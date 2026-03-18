@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -R \"c:/Users/User/Desktop/Meu crm/frontend/src/app/\\(dashboard\\)/\")",
+      "Bash(mv finance:*)",
+      "Bash(mv reports:*)",
+      "Bash(npm run:*)",
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(.venv/Scripts/python -c \":*)",
+      "Bash(npm install:*)",
+      "Bash(.venv/Scripts/python -c \"import flask_cors; print\\(''flask_cors OK:'', flask_cors.__version__\\)\")",
+      "Bash(rm -rf .next)",
+      "Bash(npx next:*)",
+      "Bash(ls \"c:/Users/User/Desktop/Meu crm/frontend/src/app/\\(dashboard\\)/\")",
+      "Bash(.venv/Scripts/python -c \"import flask_cors; print\\(''installed''\\)\")",
+      "Bash(node -e \"try { const m = require.resolve\\(''@splinetool/react-spline/next''\\); console.log\\(''RESOLVED:'', m\\); } catch\\(e\\) { console.log\\(''CANNOT RESOLVE:'', e.message\\); }\")",
+      "Bash(.venv/Scripts/python -c \"import instagrapi; print\\(''instagrapi OK:'', instagrapi.__version__\\)\")",
+      "Bash(.venv/Scripts/python -c \"from instagrapi import Client; print\\(''instagrapi OK''\\)\")",
+      "Bash(npx tsc:*)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\(''meu_crmatualizado.py'', doraise=True\\); print\\(''OK''\\)\")",
+      "Bash(ffmpeg -version)",
+      "Bash(pip install:*)",
+      "Bash(where ffmpeg:*)",
+      "Bash(python -c \":*)",
+      "Read(//c/Users/User/Desktop/**)",
+      "Bash(powershell -Command \"Compress-Archive -Path ''Meu crm\\\\*'' -DestinationPath ''Meu crm\\\\KeepMedica_CRM.zip'' -Force -CompressionLevel Optimal\")",
+      "Bash(powershell -Command \"Get-ChildItem ''C:\\\\Users\\\\User\\\\Desktop\\\\Meu crm\\\\KeepMedica_CRM.zip'' | Select-Object Name, @{N=''Size_MB'';E={[math]::Round\\($_Length/1MB,1\\)}}\")",
+      "Bash(powershell -Command \"\\(Get-Item ''C:\\\\Users\\\\User\\\\Desktop\\\\Meu crm\\\\KeepMedica_CRM.zip''\\).Length / 1MB\")",
+      "Bash(powershell -Command \"Compress-Archive -Path ''Meu crm\\\\meu_crmatualizado.py'',''Meu crm\\\\frontend\\\\src'',''Meu crm\\\\frontend\\\\public'',''Meu crm\\\\frontend\\\\package.json'',''Meu crm\\\\frontend\\\\tsconfig.json'',''Meu crm\\\\frontend\\\\next.config.ts'',''Meu crm\\\\frontend\\\\.env.local'',''Meu crm\\\\requirements.txt'',''Meu crm\\\\CLAUDE.md'',''Meu crm\\\\iniciar.bat'' -DestinationPath ''C:\\\\Users\\\\User\\\\Desktop\\\\KeepMedica_CRM.zip'' -Force\")"
+    ]
+  }
+}

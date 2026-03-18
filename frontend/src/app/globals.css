@@ -1,0 +1,262 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-brand: #206aba;
+  --color-brand-light: #2a7fd4;
+  --color-brand-dark: #1a5698;
+  --color-surface-dark: #0A0A0A;
+  --color-surface-card: #1e293b;
+  --color-surface-card-hover: #334155;
+  --color-border-dark: #334155;
+  --font-family-sans: 'Inter', system-ui, sans-serif;
+}
+
+/* Base */
+body {
+  font-family: var(--font-family-sans);
+}
+
+/* Scrollbar hide */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Kanban */
+.kanban-col { min-height: 75vh; padding-bottom: 50px; }
+.drag-over { background-color: #eff6ff !important; border: 2px dashed #206aba !important; }
+
+/* Chat */
+.chat-bg {
+  background-color: #f1f5f9;
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M30 0L60 30L30 60L0 30z' fill='%23000000' fill-opacity='0.02'/%3E%3C/svg%3E");
+}
+:is(.dark) .chat-bg {
+  background-color: #0f172a;
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M30 0L60 30L30 60L0 30z' fill='%23ffffff' fill-opacity='0.02'/%3E%3C/svg%3E");
+}
+
+.msg-bubble {
+  max-width: 75%; padding: 8px 12px; border-radius: 8px; font-size: 14px;
+  position: relative; box-shadow: 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 4px;
+}
+.msg-me {
+  background-color: rgba(32, 106, 186, 0.15); color: #1e293b;
+  align-self: flex-end; border-top-right-radius: 0;
+}
+:is(.dark) .msg-me {
+  background-color: rgba(32, 106, 186, 0.2); color: white;
+}
+.msg-them {
+  background-color: #e2e8f0; color: #1e293b;
+  align-self: flex-start; border-top-left-radius: 0;
+}
+:is(.dark) .msg-them {
+  background-color: #334155; color: white;
+}
+
+/* Loader */
+.loader {
+  border: 3px solid #e2e8f0; border-top: 3px solid #206aba;
+  border-radius: 50%; width: 24px; height: 24px;
+  animation: spin 1s linear infinite;
+}
+:is(.dark) .loader {
+  border-color: #1e293b; border-top-color: #206aba;
+}
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+/* Hub Cards */
+.hub-card {
+  background: white; border-radius: 1.5rem; padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #e2e8f0;
+  cursor: pointer; position: relative; overflow: hidden; height: 100%;
+  min-height: 16rem; display: flex; flex-direction: column; justify-content: space-between;
+  transition: all 0.3s ease;
+}
+.hub-card:hover { transform: translateY(-5px); box-shadow: 0 20px 40px rgba(0,0,0,0.08); }
+:is(.dark) .hub-card {
+  background: #1e293b; border-color: transparent;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+:is(.dark) .hub-card:hover { box-shadow: 0 20px 40px rgba(0,0,0,0.3); }
+.hub-card.locked { opacity: 0.7; cursor: not-allowed; filter: grayscale(80%); }
+.hub-card.locked:hover { transform: none; box-shadow: none; }
+
+.hub-card .card-icon {
+  width: 3rem; height: 3rem; display: flex; align-items: center; justify-content: center;
+  font-size: 1.5rem; margin-bottom: 1rem; border-radius: 0.5rem;
+  transition: transform 0.3s ease;
+}
+.hub-card:not(.locked):hover .card-icon { transform: scale(1.1); }
+
+/* Dashboard metric cards */
+.dash-card {
+  border-radius: 1rem; padding: 1.5rem; color: white;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3); position: relative;
+  overflow: hidden; transition: all 0.3s ease;
+}
+.dash-card:hover { transform: scale(1.02); }
+.dash-card .dash-icon {
+  position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  font-size: 3.5rem; opacity: 0.2;
+}
+
+/* Calendar */
+.calendar-cell {
+  height: 2.5rem; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;
+  background: white; transition: background 0.15s; position: relative;
+  cursor: pointer; font-size: 10px; padding: 2px 4px; color: #334155;
+}
+.calendar-cell:hover { background: #f1f5f9; }
+:is(.dark) .calendar-cell {
+  border-bottom-color: #334155; border-right-color: #334155;
+  background: #1e293b; color: #e2e8f0;
+}
+:is(.dark) .calendar-cell:hover { background: #334155; }
+
+.time-cell {
+  height: 2.5rem; border-bottom: 1px solid #e2e8f0; background: #f8fafc;
+  font-size: 12px; color: #64748b; font-weight: 500;
+  display: flex; align-items: center; justify-content: center;
+  position: sticky; left: 0; z-index: 10;
+}
+:is(.dark) .time-cell {
+  border-bottom-color: #334155; background: #0f172a; color: #94a3b8;
+}
+
+.doctor-header {
+  height: 3rem; flex: 1; border-right: 1px solid #e2e8f0; background: #f8fafc;
+  font-size: 12px; font-weight: 700; color: #334155;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 0.5rem; text-align: center; position: sticky; top: 0; z-index: 20;
+}
+:is(.dark) .doctor-header {
+  border-right-color: #334155; background: #0f172a; color: #cbd5e1;
+}
+
+/* Mini calendar */
+.mini-cal-day {
+  width: 2rem; height: 2rem; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; border-radius: 50%; cursor: pointer; transition: background 0.15s;
+  color: #334155;
+}
+.mini-cal-day:hover { background: #e2e8f0; }
+:is(.dark) .mini-cal-day { color: #e2e8f0; }
+:is(.dark) .mini-cal-day:hover { background: #334155; }
+.mini-cal-day.active { background: #206aba; color: white; font-weight: 700; }
+
+/* Status badges */
+.status-badge {
+  padding: 2px 8px; border-radius: 9999px; font-size: 10px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.status-pendente { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.status-aprovado { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+.status-recusado { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+
+/* Card colors */
+.card-orange { border-top: 4px solid #fb923c; }
+.card-green { border-top: 4px solid #4ade80; }
+.card-cyan { border-top: 4px solid #22d3ee; }
+.card-purple { border-top: 4px solid #8b5cf6; }
+.card-lime { border-top: 4px solid #a3e635; }
+.card-blue { border-top: 4px solid #206aba; }
+
+/* Activity panel */
+.activity-item::before {
+  content: ''; position: absolute; left: 19px; top: 40px; bottom: -20px;
+  width: 2px; background: #e2e8f0; z-index: 0;
+}
+:is(.dark) .activity-item::before { background: #334155; }
+.activity-item:last-child::before { display: none; }
+
+/* Animations */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up { animation: fadeInUp 0.3s ease-out; }
+
+@keyframes shake {
+  0% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  50% { transform: translateX(5px); }
+  75% { transform: translateX(-5px); }
+  100% { transform: translateX(0); }
+}
+.shake-anim { animation: shake 0.4s ease-in-out; }
+
+@keyframes goldenPulse {
+  0% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(250, 204, 21, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0); }
+}
+
+/* Appointment block */
+.appt-block {
+  position: absolute; left: 2px; right: 2px; border-radius: 4px;
+  padding: 2px 4px; font-size: 9px; font-weight: 600; color: white;
+  overflow: hidden; cursor: pointer; z-index: 5;
+  transition: opacity 0.15s;
+}
+.appt-block:hover { opacity: 0.85; }
+
+/* Profile menu */
+.profile-menu {
+  position: absolute; top: 4rem; right: 0; width: 20rem;
+  background: white; border: 1px solid #e2e8f0; border-radius: 1.25rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15); z-index: 1001;
+  padding: 1rem 0; animation: fadeInMenu 0.2s ease-out;
+}
+:is(.dark) .profile-menu {
+  background: #1e293b; border-color: #334155;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+@keyframes fadeInMenu {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.menu-item {
+  display: flex; align-items: center; gap: 1rem; padding: 0.75rem 1.5rem;
+  font-size: 14px; color: #64748b; border-radius: 0.75rem; margin: 0 0.5rem;
+  cursor: pointer; transition: all 0.2s;
+}
+:is(.dark) .menu-item { color: #cbd5e1; }
+.menu-item:hover { background: rgba(32, 106, 186, 0.1); color: #206aba; }
+
+/* Notification portal */
+.notif-portal {
+  position: absolute; top: 3.75rem; right: 0; width: 22rem; max-height: 31rem;
+  background: white; border: 1px solid #e2e8f0; border-radius: 0.75rem;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.1); z-index: 1000; overflow: hidden;
+}
+:is(.dark) .notif-portal {
+  background: #1e293b; border-color: #334155;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+}
+
+.notif-badge {
+  position: absolute; top: -5px; right: -5px; background: #ef4444; color: white;
+  font-size: 10px; font-weight: 700; min-width: 18px; height: 18px;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  border: 2px solid white;
+}
+:is(.dark) .notif-badge { border-color: #1e293b; }
+
+/* Resizer for calendar columns */
+.resizer {
+  position: absolute; right: 0; top: 0; bottom: 0; width: 5px;
+  cursor: col-resize; z-index: 50; transition: background 0.2s;
+}
+.resizer:hover { background: #206aba; }
+
+/* Golden button (upgrade CTA) */
+.golden-btn {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  width: 20rem; border-radius: 0.75rem; border: 2px dashed #facc15;
+  background: rgba(250, 204, 21, 0.1); cursor: pointer; flex-shrink: 0;
+  opacity: 0.8; transition: all 0.3s; animation: goldenPulse 2s infinite;
+}
+.golden-btn:hover { opacity: 1; background: rgba(250, 204, 21, 0.15); }
