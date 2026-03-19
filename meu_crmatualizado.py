@@ -1995,6 +1995,65 @@ def instagram_proxy():
     return jsonify({"success": True, "configured": bool(proxy_url)})
 
 
+@app.route('/api/instagram/export_session', methods=['GET'])
+@login_required
+def instagram_export_session():
+    """Exporta a sessão Instagram para transferir para outra máquina (ex: VPS)."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT ig_username, session_data FROM instagram_sessions WHERE user_id = ? AND connected = 1",
+        (current_user.id,)
+    ).fetchone()
+    conn.close()
+    if not row or not row['session_data']:
+        return jsonify({"success": False, "error": "Nenhuma sessão Instagram ativa para exportar."}), 404
+    import base64
+    token = base64.b64encode(json.dumps({
+        "ig_username": row['ig_username'],
+        "session_data": row['session_data']
+    }).encode()).decode()
+    return jsonify({"success": True, "token": token, "ig_username": row['ig_username']})
+
+
+@app.route('/api/instagram/import_session', methods=['POST'])
+@login_required
+def instagram_import_session():
+    """Importa uma sessão Instagram exportada de outra máquina."""
+    data = request.json
+    token = (data.get('token') or '').strip()
+    if not token:
+        return jsonify({"success": False, "error": "Token de sessão é obrigatório."}), 400
+    try:
+        import base64
+        payload = json.loads(base64.b64decode(token).decode())
+        ig_username = payload['ig_username']
+        session_data = payload['session_data']
+        # Validar que a sessão contém dados reais
+        settings = json.loads(session_data)
+        if not settings.get('authorization_data', {}).get('sessionid'):
+            return jsonify({"success": False, "error": "Token de sessão inválido ou corrompido."}), 400
+        # Salvar sessão no banco
+        conn = get_db()
+        existing = conn.execute("SELECT id FROM instagram_sessions WHERE user_id = ?", (current_user.id,)).fetchone()
+        now = datetime.now().isoformat()
+        if existing:
+            conn.execute(
+                "UPDATE instagram_sessions SET ig_username=?, session_data=?, connected=1, connected_at=? WHERE user_id=?",
+                (ig_username, session_data, now, current_user.id)
+            )
+        else:
+            conn.execute(
+                "INSERT INTO instagram_sessions (user_id, ig_username, session_data, connected) VALUES (?, ?, ?, 1)",
+                (current_user.id, ig_username, session_data)
+            )
+        conn.commit()
+        conn.close()
+        log_action(current_user.id, f"importou sessão do Instagram <b>@{ig_username}</b>", current_user.pipeline_id)
+        return jsonify({"success": True, "ig_username": ig_username})
+    except (json.JSONDecodeError, KeyError, Exception) as e:
+        return jsonify({"success": False, "error": f"Token inválido: {str(e)}"}), 400
+
+
 @app.route('/api/instagram/disconnect', methods=['POST'])
 @login_required
 def instagram_disconnect():

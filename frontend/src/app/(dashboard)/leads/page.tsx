@@ -6,7 +6,7 @@ import { fetchApi } from '@/lib/api';
 import { useNotification } from '@/components/NotificationProvider';
 import type { Lead, Stage } from '@/types';
 
-type IgStep = 'login' | 'loading' | 'challenge' | 'success' | 'threads' | 'importing' | 'done';
+type IgStep = 'login' | 'loading' | 'challenge' | 'success' | 'threads' | 'importing' | 'done' | 'import_session' | 'export_session';
 type IgThread = {
     thread_id: string;
     user_id: string;
@@ -172,6 +172,7 @@ export default function LeadsPage() {
     const [igThreads, setIgThreads] = useState<IgThread[]>([]);
     const [igSelectedThreads, setIgSelectedThreads] = useState<Set<string>>(new Set());
     const [igImportResult, setIgImportResult] = useState('');
+    const [igSessionToken, setIgSessionToken] = useState('');
 
     // Chat state
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -463,6 +464,33 @@ export default function LeadsPage() {
             setIgConnectedUser(res.ig_username || igUsername);
             setIgStep('success');
         } catch { setIgError('Erro de conexão com o servidor.'); setIgStep('challenge'); }
+    };
+
+    const handleIgExportSession = async () => {
+        setIgError('');
+        try {
+            const res = await fetchApi('/instagram/export_session');
+            if (!res.success) { setIgError(res.error || 'Erro ao exportar sessão.'); return; }
+            setIgSessionToken(res.token);
+            setIgStep('export_session');
+        } catch { setIgError('Erro de conexão com o servidor.'); }
+    };
+
+    const handleIgImportSession = async () => {
+        if (!igSessionToken.trim()) { setIgError('Cole o token de sessão.'); return; }
+        setIgError('');
+        setIgStep('loading');
+        try {
+            const res = await fetchApi('/instagram/import_session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: igSessionToken.trim() }),
+            });
+            if (!res.success) { setIgError(res.error || 'Erro ao importar sessão.'); setIgStep('import_session'); return; }
+            setIgConnected(true);
+            setIgConnectedUser(res.ig_username);
+            setIgStep('success');
+        } catch { setIgError('Erro de conexão com o servidor.'); setIgStep('import_session'); }
     };
 
     const fetchIgThreads = async () => {
@@ -1558,6 +1586,76 @@ export default function LeadsPage() {
                                             <i className="fas fa-paper-plane mr-2"></i>Solicitar Acesso
                                         </button>
                                         <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Suas credenciais são usadas apenas para autenticação.</p>
+                                        <div className="border-t border-slate-200 dark:border-slate-700 pt-3 mt-2">
+                                            <button onClick={() => { setIgStep('import_session'); setIgError(''); setIgSessionToken(''); }}
+                                                className="w-full text-sm text-slate-500 dark:text-slate-400 hover:text-pink-600 dark:hover:text-pink-400 transition cursor-pointer py-2 flex items-center justify-center gap-2">
+                                                <i className="fas fa-download"></i> Importar sessão de outro PC
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* IMPORT SESSION */}
+                                {igStep === 'import_session' && (
+                                    <div className="space-y-4">
+                                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl px-4 py-3">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <i className="fas fa-download text-blue-500"></i>
+                                                <span className="text-sm font-bold text-blue-700 dark:text-blue-400">Importar Sessão</span>
+                                            </div>
+                                            <p className="text-xs text-blue-600 dark:text-blue-300">
+                                                Faça login no CRM pelo seu PC de casa, exporte a sessão e cole o token aqui.
+                                                Isso evita o bloqueio de IP do datacenter.
+                                            </p>
+                                        </div>
+                                        {igError && (
+                                            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm rounded-xl px-4 py-3 flex items-center gap-2">
+                                                <i className="fas fa-exclamation-circle"></i>{igError}
+                                            </div>
+                                        )}
+                                        <div>
+                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Token de Sessão</label>
+                                            <textarea value={igSessionToken} onChange={e => setIgSessionToken(e.target.value)}
+                                                placeholder="Cole o token copiado do outro PC aqui..."
+                                                rows={4}
+                                                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-white rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition placeholder-slate-400 text-xs font-mono resize-none" />
+                                        </div>
+                                        <button onClick={handleIgImportSession}
+                                            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 rounded-xl font-bold hover:opacity-90 transition active:scale-[0.98] cursor-pointer shadow-lg shadow-blue-500/20">
+                                            <i className="fas fa-check-circle mr-2"></i>Importar Sessão
+                                        </button>
+                                        <button onClick={() => { setIgStep('login'); setIgError(''); }}
+                                            className="w-full text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer py-2">
+                                            <i className="fas fa-arrow-left mr-1"></i> Voltar ao login
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* EXPORT SESSION */}
+                                {igStep === 'export_session' && (
+                                    <div className="space-y-4">
+                                        <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl px-4 py-3">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <i className="fas fa-upload text-emerald-500"></i>
+                                                <span className="text-sm font-bold text-emerald-700 dark:text-emerald-400">Exportar Sessão</span>
+                                            </div>
+                                            <p className="text-xs text-emerald-600 dark:text-emerald-300">
+                                                Copie o token abaixo e cole no CRM da VPS para transferir a sessão.
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Token de Sessão</label>
+                                            <textarea value={igSessionToken} readOnly rows={4}
+                                                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-white rounded-xl outline-none text-xs font-mono resize-none" />
+                                        </div>
+                                        <button onClick={() => { navigator.clipboard.writeText(igSessionToken); }}
+                                            className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white py-3 rounded-xl font-bold hover:opacity-90 transition active:scale-[0.98] cursor-pointer shadow-lg shadow-emerald-500/20">
+                                            <i className="fas fa-copy mr-2"></i>Copiar Token
+                                        </button>
+                                        <button onClick={() => setShowIgModal(false)}
+                                            className="w-full text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer py-2">
+                                            Fechar
+                                        </button>
                                     </div>
                                 )}
 
@@ -1704,6 +1802,11 @@ export default function LeadsPage() {
                                                     className="flex-1 bg-brand hover:opacity-90 text-white py-3 rounded-xl font-bold transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-brand/20 flex items-center justify-center gap-2">
                                                     <i className="fas fa-file-import"></i>
                                                     Confirmar Importação ({igSelectedThreads.size})
+                                                </button>
+                                                <button onClick={handleIgExportSession}
+                                                    className="px-5 bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-600 py-3 rounded-xl font-bold transition cursor-pointer border border-emerald-200 dark:border-emerald-800 flex items-center gap-2"
+                                                    title="Exportar sessão para usar na VPS">
+                                                    <i className="fas fa-upload"></i>
                                                 </button>
                                                 <button onClick={handleIgDisconnect}
                                                     className="px-5 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-500 py-3 rounded-xl font-bold transition cursor-pointer border border-red-200 dark:border-red-800 flex items-center gap-2">
