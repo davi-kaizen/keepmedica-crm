@@ -1527,8 +1527,12 @@ export default function LeadsPage() {
                                     <div className="space-y-4">
                                         <p className="text-sm text-slate-500 dark:text-slate-400">Insira suas credenciais do Instagram para conectar ao CRM.</p>
                                         {igError && (
-                                            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm rounded-xl px-4 py-3 flex items-center gap-2">
-                                                <i className="fas fa-exclamation-circle"></i>{igError}
+                                            <div className={`${igError.includes('IP') || igError.includes('datacenter') || igError.includes('proxy') ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-600 dark:text-red-400'} border text-sm rounded-xl px-4 py-3`}>
+                                                <div className="flex items-center gap-2">
+                                                    <i className={`fas ${igError.includes('IP') || igError.includes('datacenter') || igError.includes('proxy') ? 'fa-server' : 'fa-exclamation-circle'}`}></i>
+                                                    <span className="font-semibold">{igError.includes('IP') || igError.includes('datacenter') || igError.includes('proxy') ? 'Erro ao conectar: IP bloqueado' : 'Erro ao conectar'}</span>
+                                                </div>
+                                                <p className="mt-1 text-xs opacity-90">{igError}</p>
                                             </div>
                                         )}
                                         <div>

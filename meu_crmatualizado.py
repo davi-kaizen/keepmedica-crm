@@ -24,9 +24,17 @@ IG_USER_AGENT = (
     "Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; "
     "samsung; SM-S908B; b0q; qcom; pt_BR; 458229258)"
 )
-# Proxy opcional: defina a variável de ambiente IG_PROXY se seu IP estiver bloqueado
+# Proxy opcional: defina via variável de ambiente IG_PROXY ou arquivo proxy.txt
 # Exemplo: export IG_PROXY="http://user:pass@proxy.example.com:8080"
+# Ou crie um arquivo proxy.txt na raiz do projeto com a URL do proxy
 IG_PROXY = os.environ.get("IG_PROXY", "")
+if not IG_PROXY:
+    _proxy_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'proxy.txt')
+    if os.path.exists(_proxy_file):
+        with open(_proxy_file, 'r') as f:
+            IG_PROXY = f.read().strip()
+        if IG_PROXY:
+            print(f"[IG PROXY] Carregado de proxy.txt: {IG_PROXY[:30]}...")
 
 # ==============================================================================
 # CONFIGURAÇÕES E CONSTANTES
@@ -1723,12 +1731,35 @@ def _create_instagram_client():
     """Cria um InstaClient configurado com User-Agent realista e proxy opcional."""
     cl = InstaClient()
     cl.delay_range = [2, 5]
-    # User-Agent de dispositivo Android real para evitar detecção de servidor
+    # Configurações de dispositivo Android real para evitar detecção
     cl.set_user_agent(IG_USER_AGENT)
+    cl.set_device({
+        "app_version": "275.0.0.27.98",
+        "android_version": 33,
+        "android_release": "13.0",
+        "dpi": "420dpi",
+        "resolution": "1080x2400",
+        "manufacturer": "samsung",
+        "device": "SM-S908B",
+        "model": "b0q",
+        "cpu": "qcom",
+        "version_code": "458229258",
+    })
+    cl.set_country("BR")
+    cl.set_country_code(55)
+    cl.set_locale("pt_BR")
+    cl.set_timezone_offset(-10800)  # UTC-3 (Brasília)
     # Proxy residencial (se configurado) para IPs bloqueados
-    if IG_PROXY:
-        cl.set_proxy(IG_PROXY)
-        print(f"[IG CLIENT] Usando proxy: {IG_PROXY[:30]}...")
+    # Recarregar proxy.txt em runtime (permite alterar sem reiniciar)
+    proxy = IG_PROXY
+    if not proxy:
+        _proxy_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'proxy.txt')
+        if os.path.exists(_proxy_file):
+            with open(_proxy_file, 'r') as f:
+                proxy = f.read().strip()
+    if proxy:
+        cl.set_proxy(proxy)
+        print(f"[IG CLIENT] Usando proxy: {proxy[:30]}...")
     return cl
 
 
@@ -1746,7 +1777,12 @@ def _parse_instagram_error(e):
     print(f"[IG ERROR] Tipo: {type(e).__name__} | Msg: {str(e)[:200]} | Raw: {raw_text[:200]}")
 
     if 'blacklist' in err_str or 'ip' in err_str:
-        return "Seu IP foi bloqueado pelo Instagram. Tente novamente mais tarde ou use uma rede diferente (ex: dados móveis)."
+        return "Seu IP foi bloqueado pelo Instagram. Configure um proxy residencial no arquivo proxy.txt ou use uma rede diferente."
+    if "can't find" in err_str or 'cant find' in err_str or 'cannot find' in err_str or 'user_not_found' in err_str:
+        return ("O Instagram bloqueou este IP de datacenter (VPS/cloud). "
+                "Isso não é erro de usuário/senha. "
+                "Configure um proxy residencial no arquivo proxy.txt na raiz do projeto "
+                "ou faça login a partir de uma rede residencial.")
     if 'bad_password' in err_str or 'invalid' in err_str:
         return "Usuário ou senha incorretos. Verifique suas credenciais."
     if 'please wait' in err_str or 'few minutes' in err_str:
@@ -1930,6 +1966,33 @@ def instagram_status():
     if row and row['connected']:
         return jsonify({"connected": True, "ig_username": row['ig_username']})
     return jsonify({"connected": False})
+
+
+@app.route('/api/instagram/proxy', methods=['GET', 'POST'])
+@login_required
+def instagram_proxy():
+    """GET: retorna proxy configurado. POST: salva proxy no arquivo proxy.txt."""
+    global IG_PROXY
+    proxy_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'proxy.txt')
+
+    if request.method == 'GET':
+        proxy = IG_PROXY
+        if not proxy and os.path.exists(proxy_file):
+            with open(proxy_file, 'r') as f:
+                proxy = f.read().strip()
+        return jsonify({"proxy": proxy[:30] + "..." if len(proxy) > 30 else proxy, "configured": bool(proxy)})
+
+    # POST — salvar proxy
+    data = request.json
+    proxy_url = (data.get('proxy') or '').strip()
+    with open(proxy_file, 'w') as f:
+        f.write(proxy_url)
+    IG_PROXY = proxy_url
+    if proxy_url:
+        print(f"[IG PROXY] Proxy configurado via API: {proxy_url[:30]}...")
+    else:
+        print("[IG PROXY] Proxy removido via API.")
+    return jsonify({"success": True, "configured": bool(proxy_url)})
 
 
 @app.route('/api/instagram/disconnect', methods=['POST'])
