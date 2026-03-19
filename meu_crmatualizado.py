@@ -53,8 +53,12 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 
-# CORS — permite requisições do frontend Next.js em desenvolvimento
-CORS(app, resources={r"/api/*": {"origins": ["http://localhost:3000", "http://127.0.0.1:3000"]}}, supports_credentials=True)
+# CORS — permite requisições do frontend Next.js (local + VPS)
+CORS(app, resources={r"/api/*": {"origins": [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://136.248.105.0:3000",
+]}}, supports_credentials=True)
 
 # Rate Limiter — proteção contra brute force e abuso
 limiter = Limiter(
