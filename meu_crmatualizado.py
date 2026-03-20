@@ -2794,4 +2794,11 @@ def instagram_send_media():
 
 if __name__ == '__main__':
     init_db()
-    app.run(debug=True, port=5000, host='127.0.0.1')
+    # Em produção (VPS): debug=False, host=0.0.0.0
+    # Local: debug=True, host=127.0.0.1
+    _is_production = os.environ.get('FLASK_ENV') == 'production' or os.path.exists('/home/ubuntu')
+    app.run(
+        debug=not _is_production,
+        port=5000,
+        host='0.0.0.0' if _is_production else '127.0.0.1'
+    )
