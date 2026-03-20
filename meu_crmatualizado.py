@@ -1727,36 +1727,89 @@ def api_reports_save_notes():
 # Armazena instâncias temporárias de InstaClient enquanto aguardam código de verificação
 PENDING_INSTA_CLIENTS = {}
 
-def _create_instagram_client():
-    """Cria um InstaClient configurado com User-Agent realista e proxy opcional."""
-    cl = InstaClient()
-    cl.delay_range = [2, 5]
-    # Configurações de dispositivo Android real para evitar detecção
-    cl.set_user_agent(IG_USER_AGENT)
-    cl.set_device({
-        "app_version": "275.0.0.27.98",
-        "android_version": 33,
-        "android_release": "13.0",
-        "dpi": "420dpi",
-        "resolution": "1080x2400",
-        "manufacturer": "samsung",
-        "device": "SM-S908B",
-        "model": "b0q",
-        "cpu": "qcom",
-        "version_code": "458229258",
-    })
-    cl.set_country("BR")
-    cl.set_country_code(55)
-    cl.set_locale("pt_BR")
-    cl.set_timezone_offset(-10800)  # UTC-3 (Brasília)
-    # Proxy residencial (se configurado) para IPs bloqueados
-    # Recarregar proxy.txt em runtime (permite alterar sem reiniciar)
+def _get_proxy_url():
+    """Retorna URL do proxy (env var ou proxy.txt)."""
     proxy = IG_PROXY
     if not proxy:
         _proxy_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'proxy.txt')
         if os.path.exists(_proxy_file):
             with open(_proxy_file, 'r') as f:
                 proxy = f.read().strip()
+    return proxy
+
+
+def _generate_device_settings():
+    """Gera settings completos de um dispositivo Android real (como se o app já estivesse instalado)."""
+    import uuid
+    phone_id = str(uuid.uuid4())
+    android_id = ''.join(random.choices('0123456789abcdef', k=16))
+    client_session_id = str(uuid.uuid4())
+    advertising_id = str(uuid.uuid4())
+    device_id = str(uuid.uuid4())
+    return {
+        "uuids": {
+            "phone_id": phone_id,
+            "uuid": str(uuid.uuid4()),
+            "client_session_id": client_session_id,
+            "advertising_id": advertising_id,
+            "android_device_id": f"android-{android_id}",
+            "request_id": str(uuid.uuid4()),
+            "tray_session_id": str(uuid.uuid4()),
+        },
+        "device_settings": {
+            "app_version": "275.0.0.27.98",
+            "android_version": 33,
+            "android_release": "13.0",
+            "dpi": "420dpi",
+            "resolution": "1080x2400",
+            "manufacturer": "samsung",
+            "device": "SM-S908B",
+            "model": "b0q",
+            "cpu": "qcom",
+            "version_code": "458229258",
+        },
+        "user_agent": IG_USER_AGENT,
+        "country": "BR",
+        "country_code": 55,
+        "locale": "pt_BR",
+        "timezone_offset": -10800,
+    }
+
+
+def _create_instagram_client(for_login=False):
+    """Cria um InstaClient configurado com User-Agent realista e proxy opcional.
+    Se for_login=True, pré-carrega settings completos para simular dispositivo existente."""
+    cl = InstaClient()
+    cl.delay_range = [2, 5]
+
+    if for_login:
+        # Pré-carregar settings completos antes do login
+        # Isso faz o Instagram pensar que é um celular que já tinha o app instalado
+        settings = _generate_device_settings()
+        cl.set_settings(settings)
+        cl.set_user_agent(IG_USER_AGENT)
+        print("[IG CLIENT] Settings de dispositivo pré-carregados para login")
+    else:
+        cl.set_user_agent(IG_USER_AGENT)
+        cl.set_device({
+            "app_version": "275.0.0.27.98",
+            "android_version": 33,
+            "android_release": "13.0",
+            "dpi": "420dpi",
+            "resolution": "1080x2400",
+            "manufacturer": "samsung",
+            "device": "SM-S908B",
+            "model": "b0q",
+            "cpu": "qcom",
+            "version_code": "458229258",
+        })
+        cl.set_country("BR")
+        cl.set_country_code(55)
+        cl.set_locale("pt_BR")
+        cl.set_timezone_offset(-10800)
+
+    # Proxy residencial
+    proxy = _get_proxy_url()
     if proxy:
         cl.set_proxy(proxy)
         print(f"[IG CLIENT] Usando proxy: {proxy[:30]}...")
@@ -1778,12 +1831,15 @@ def _parse_instagram_error(e):
 
     if 'blacklist' in err_str or 'ip' in err_str:
         return "Seu IP foi bloqueado pelo Instagram. Configure um proxy residencial no arquivo proxy.txt ou use uma rede diferente."
-    if "can't find" in err_str or 'cant find' in err_str or 'cannot find' in err_str or 'user_not_found' in err_str:
+    if "can't find" in err_str or 'cant find' in err_str or 'cannot find' in err_str or 'user_not_found' in err_str or 'encontrar uma conta' in err_str or 'não foi possível encontrar' in err_str:
         return ("O Instagram bloqueou este IP de datacenter (VPS/cloud). "
                 "Isso não é erro de usuário/senha. "
                 "Configure um proxy residencial no arquivo proxy.txt na raiz do projeto "
                 "ou faça login a partir de uma rede residencial.")
-    if 'bad_password' in err_str or 'invalid' in err_str:
+    if ('bad_password' in err_str or 'invalid' in err_str or 'invalid_credentials' in err_str) and 'blacklist' in err_str:
+        return ("O IP do proxy foi bloqueado pelo Instagram. "
+                "No painel do IPRoyal, clique em 'Clear sessions' para obter um novo IP e tente novamente em 15 minutos.")
+    if 'bad_password' in err_str or 'invalid_credentials' in err_str:
         return "Usuário ou senha incorretos. Verifique suas credenciais."
     if 'please wait' in err_str or 'few minutes' in err_str:
         return "O Instagram pediu para aguardar alguns minutos antes de tentar novamente."
@@ -1826,7 +1882,7 @@ def instagram_login():
 
     if saved and saved['session_data'] and saved['ig_username'] == ig_username:
         try:
-            cl = _create_instagram_client()
+            cl = _create_instagram_client(for_login=False)
             cl.set_settings(json.loads(saved['session_data']))
             session_id = cl.settings.get('authorization_data', {}).get('sessionid', '')
             if session_id:
@@ -1838,10 +1894,10 @@ def instagram_login():
             print(f"[IG LOGIN] Sessão salva inválida, fazendo login novo: {e}")
             _invalidate_instagram_session(current_user.id)
 
-    # --- Login novo com delays humanizados ---
-    cl = _create_instagram_client()
+    # --- Login novo com settings pré-carregados e delays humanizados ---
+    cl = _create_instagram_client(for_login=True)
     print(f"[IG LOGIN] Iniciando login para @{ig_username}...")
-    time.sleep(random.uniform(1.5, 3.0))  # Delay pré-login
+    time.sleep(random.uniform(3.0, 6.0))  # Delay pré-login mais longo
 
     try:
         cl.login(ig_username, ig_password)
