@@ -2020,7 +2020,22 @@ def instagram_login():
                 "message": "Autenticação de dois fatores ativada. Insira o código do app autenticador."
             })
 
-        # Caso 4: Erro de credenciais
+        # Caso 4: Account Recovery Modal (muitas tentativas)
+        if login_data.get('showAccountRecoveryModal'):
+            return jsonify({"success": False, "error": (
+                "O Instagram bloqueou temporariamente o login por excesso de tentativas. "
+                "Aguarde 30 minutos e tente novamente. "
+                "Ou abra o app do Instagram no celular e faça login para desbloquear."
+            )}), 429
+
+        # Caso 5: user=True, authenticated=False (login parcial / conta precisa de ação)
+        if login_data.get('user') and not login_data.get('authenticated') and login_data.get('status') == 'ok':
+            return jsonify({"success": False, "error": (
+                "O Instagram reconheceu a conta mas bloqueou o login temporariamente. "
+                "Abra o app do Instagram no celular, faça login manualmente e depois tente aqui novamente."
+            )}), 429
+
+        # Caso 6: Erro de credenciais
         error_msg = login_data.get('message', '')
         if login_data.get('status') == 'fail':
             if 'password' in error_msg.lower() or login_data.get('invalid_credentials'):
@@ -2028,7 +2043,7 @@ def instagram_login():
             if 'wait' in error_msg.lower() or 'few minutes' in error_msg.lower():
                 return jsonify({"success": False, "error": "O Instagram pediu para aguardar alguns minutos."}), 429
 
-        # Caso 5: Erro desconhecido
+        # Caso 7: Erro desconhecido
         print(f"[IG LOGIN] Resposta não tratada: {str(login_data)[:300]}")
         return jsonify({"success": False, "error": f"Erro ao conectar: {error_msg or 'resposta inesperada do Instagram'}"}), 500
 
