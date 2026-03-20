@@ -1957,19 +1957,49 @@ def instagram_login():
         if login_data.get('message') == 'checkpoint_required' or login_data.get('checkpoint_url'):
             checkpoint_url = login_data.get('checkpoint_url', '')
             print(f"[IG LOGIN] Checkpoint para @{ig_username}: {checkpoint_url}")
-            # Armazenar a web session para uso posterior na verificação
+
+            # Solicitar envio do código de verificação
+            verify_method = None
+            if checkpoint_url:
+                try:
+                    full_cp_url = f"https://www.instagram.com{checkpoint_url}" if checkpoint_url.startswith('/') else checkpoint_url
+                    time.sleep(random.uniform(1.0, 2.0))
+
+                    # Acessar página do checkpoint para obter opções
+                    r_cp = web_session.get(full_cp_url, timeout=15)
+                    new_csrf = web_session.cookies.get('csrftoken', csrf)
+                    web_session.headers['X-CSRFToken'] = new_csrf
+
+                    # Solicitar envio por email (choice=1) ou SMS (choice=0)
+                    time.sleep(random.uniform(1.0, 2.0))
+                    r_send = web_session.post(full_cp_url, data={
+                        'choice': '1',  # 1 = email, 0 = SMS
+                    }, timeout=15)
+                    send_data = {}
+                    try:
+                        send_data = r_send.json()
+                    except Exception:
+                        pass
+                    print(f"[IG LOGIN] Checkpoint code sent: status={r_send.status_code} data={str(send_data)[:200]}")
+                    verify_method = 'email'
+                except Exception as e:
+                    print(f"[IG LOGIN] Erro ao solicitar código: {e}")
+
             PENDING_INSTA_CLIENTS[current_user.id] = {
                 "web_session": web_session,
                 "username": ig_username,
                 "password": ig_password,
                 "checkpoint_url": checkpoint_url,
-                "csrf": csrf,
+                "csrf": web_session.cookies.get('csrftoken', csrf),
                 "login_method": "web",
             }
+            msg = "O Instagram enviou um código de verificação para o seu e-mail."
+            if verify_method == 'sms':
+                msg = "O Instagram enviou um código de verificação por SMS."
             return jsonify({
                 "success": True,
                 "status": "challenge_required",
-                "message": "O Instagram enviou um código de verificação para o seu e-mail/telefone."
+                "message": msg
             })
 
         # Caso 3: Two Factor Required
