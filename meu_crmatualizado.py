@@ -1894,21 +1894,77 @@ def instagram_login():
             print(f"[IG LOGIN] Sessão salva inválida, fazendo login novo: {e}")
             _invalidate_instagram_session(current_user.id)
 
-    # --- Login novo com settings pré-carregados e delays humanizados ---
-    cl = _create_instagram_client(for_login=True)
-    print(f"[IG LOGIN] Iniciando login para @{ig_username}...")
-    time.sleep(random.uniform(3.0, 6.0))  # Delay pré-login mais longo
+    # --- Login via Web API (mais confiável com proxies) ---
+    print(f"[IG LOGIN] Iniciando login via Web API para @{ig_username}...")
+    proxy = _get_proxy_url()
+    proxies = {'http': proxy, 'https': proxy} if proxy else {}
+
+    web_session = requests.Session()
+    if proxies:
+        web_session.proxies = proxies
+    web_session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+        'Accept-Language': 'pt-BR,pt;q=0.9',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Referer': 'https://www.instagram.com/accounts/login/',
+        'Origin': 'https://www.instagram.com',
+    })
 
     try:
-        cl.login(ig_username, ig_password)
+        # Passo 1: Pegar CSRF token
+        r1 = web_session.get('https://www.instagram.com/accounts/login/', timeout=15)
+        csrf = web_session.cookies.get('csrftoken', '')
+        if not csrf:
+            # Tentar extrair do HTML
+            import re
+            m = re.search(r'"csrf_token":"([^"]+)"', r1.text)
+            if m:
+                csrf = m.group(1)
+        if not csrf:
+            raise Exception("Não foi possível obter CSRF token do Instagram.")
 
-        # Verificar se last_json contém challenge mesmo após login "bem-sucedido"
-        last = getattr(cl, 'last_json', {}) or {}
-        if last.get('message') == 'challenge_required' or last.get('challenge'):
-            print(f"[IG LOGIN] Challenge detectado pós-login para @{ig_username}")
-            challenge_url = last.get('challenge', {}).get('api_path', '')
+        time.sleep(random.uniform(2.0, 4.0))
+
+        # Passo 2: Login via Web API
+        web_session.headers['X-CSRFToken'] = csrf
+        login_resp = web_session.post('https://www.instagram.com/accounts/login/ajax/', data={
+            'username': ig_username,
+            'enc_password': f'#PWD_INSTAGRAM_BROWSER:0:{int(time.time())}:{ig_password}',
+            'queryParams': '{}',
+            'optIntoOneTap': 'false',
+        }, timeout=15)
+
+        login_data = {}
+        try:
+            login_data = login_resp.json()
+        except Exception:
+            pass
+
+        print(f"[IG LOGIN] Web API response status={login_resp.status_code} data={str(login_data)[:200]}")
+        web_sessionid = web_session.cookies.get('sessionid', '')
+
+        # Caso 1: Login direto com sucesso
+        if login_data.get('authenticated') and web_sessionid:
+            print(f"[IG LOGIN] Web login OK para @{ig_username}, convertendo sessão...")
+            # Converter sessão web para Instagrapi
+            cl = _create_instagram_client(for_login=False)
+            cl.login_by_sessionid(web_sessionid)
+            _save_instagram_session(current_user.id, ig_username, cl)
+            log_action(current_user.id, f"conectou o Instagram <b>@{ig_username}</b>", current_user.pipeline_id)
+            return jsonify({"success": True, "status": "connected", "ig_username": ig_username})
+
+        # Caso 2: Challenge / Checkpoint required
+        if login_data.get('message') == 'checkpoint_required' or login_data.get('checkpoint_url'):
+            checkpoint_url = login_data.get('checkpoint_url', '')
+            print(f"[IG LOGIN] Checkpoint para @{ig_username}: {checkpoint_url}")
+            # Armazenar a web session para uso posterior na verificação
             PENDING_INSTA_CLIENTS[current_user.id] = {
-                "client": cl, "username": ig_username, "challenge_url": challenge_url
+                "web_session": web_session,
+                "username": ig_username,
+                "password": ig_password,
+                "checkpoint_url": checkpoint_url,
+                "csrf": csrf,
+                "login_method": "web",
             }
             return jsonify({
                 "success": True,
@@ -1916,64 +1972,42 @@ def instagram_login():
                 "message": "O Instagram enviou um código de verificação para o seu e-mail/telefone."
             })
 
-        # Login direto sem challenge — salvar sessão imediatamente
-        _save_instagram_session(current_user.id, ig_username, cl)
-        log_action(current_user.id, f"conectou o Instagram <b>@{ig_username}</b>", current_user.pipeline_id)
-        print(f"[IG LOGIN] Login bem-sucedido para @{ig_username}")
-        return jsonify({"success": True, "status": "connected", "ig_username": ig_username})
-
-    except ChallengeRequired as e:
-        print(f"[IG LOGIN] ChallengeRequired para @{ig_username}: {e}")
-        challenge_url = ''
-        last = getattr(cl, 'last_json', {}) or {}
-        if last.get('challenge'):
-            challenge_url = last['challenge'].get('api_path', '')
-        PENDING_INSTA_CLIENTS[current_user.id] = {
-            "client": cl, "username": ig_username, "challenge_url": challenge_url
-        }
-        return jsonify({
-            "success": True,
-            "status": "challenge_required",
-            "message": "O Instagram enviou um código de verificação para o seu e-mail/telefone."
-        })
-
-    except TwoFactorRequired as e:
-        print(f"[IG LOGIN] TwoFactorRequired para @{ig_username}: {e}")
-        PENDING_INSTA_CLIENTS[current_user.id] = {"client": cl, "username": ig_username}
-        return jsonify({
-            "success": True,
-            "status": "two_factor_required",
-            "message": "Autenticação de dois fatores ativada. Insira o código do app autenticador."
-        })
-
-    except BadPassword:
-        return jsonify({"success": False, "error": "Usuário ou senha incorretos."}), 401
-
-    except PleaseWaitFewMinutes:
-        return jsonify({"success": False, "error": "O Instagram pediu para aguardar alguns minutos. Tente novamente depois."}), 429
-
-    except FeedbackRequired:
-        return jsonify({"success": False, "error": "O Instagram bloqueou temporariamente esta ação. Abra o app do Instagram e resolva o aviso."}), 429
-
-    except (ClientJSONDecodeError, Exception) as e:
-        error_msg = str(e)
-        print(f"[IG LOGIN] Erro para @{ig_username}: {type(e).__name__}: {error_msg}")
-
-        # Tentar interpretar o erro com mensagem amigável
-        friendly = _parse_instagram_error(e)
-
-        # Challenge escondido em exceções genéricas
-        if friendly is None and ("challenge" in error_msg.lower() or "checkpoint" in error_msg.lower()):
-            PENDING_INSTA_CLIENTS[current_user.id] = {"client": cl, "username": ig_username}
+        # Caso 3: Two Factor Required
+        if login_data.get('two_factor_required'):
+            print(f"[IG LOGIN] 2FA para @{ig_username}")
+            two_factor_info = login_data.get('two_factor_info', {})
+            PENDING_INSTA_CLIENTS[current_user.id] = {
+                "web_session": web_session,
+                "username": ig_username,
+                "password": ig_password,
+                "two_factor_info": two_factor_info,
+                "csrf": csrf,
+                "login_method": "web",
+            }
             return jsonify({
                 "success": True,
-                "status": "challenge_required",
-                "message": "O Instagram exige verificação. Insira o código enviado para o seu e-mail."
+                "status": "two_factor_required",
+                "message": "Autenticação de dois fatores ativada. Insira o código do app autenticador."
             })
 
+        # Caso 4: Erro de credenciais
+        error_msg = login_data.get('message', '')
+        if login_data.get('status') == 'fail':
+            if 'password' in error_msg.lower() or login_data.get('invalid_credentials'):
+                return jsonify({"success": False, "error": "Usuário ou senha incorretos."}), 401
+            if 'wait' in error_msg.lower() or 'few minutes' in error_msg.lower():
+                return jsonify({"success": False, "error": "O Instagram pediu para aguardar alguns minutos."}), 429
+
+        # Caso 5: Erro desconhecido
+        print(f"[IG LOGIN] Resposta não tratada: {str(login_data)[:300]}")
+        return jsonify({"success": False, "error": f"Erro ao conectar: {error_msg or 'resposta inesperada do Instagram'}"}), 500
+
+    except Exception as e:
+        error_msg = str(e)
+        print(f"[IG LOGIN] Exceção para @{ig_username}: {type(e).__name__}: {error_msg}")
+        friendly = _parse_instagram_error(e)
         final_msg = friendly or f"Erro ao conectar: {error_msg}"
-        status_code = 429 if 'wait' in error_msg.lower() or 'blacklist' in error_msg.lower() else 500
-        return jsonify({"success": False, "error": final_msg}), status_code
+        return jsonify({"success": False, "error": final_msg}), 500
 
 
 @app.route('/api/instagram/verify', methods=['POST'])
@@ -1981,6 +2015,7 @@ def instagram_login():
 def instagram_verify():
     """
     Passo 2: Recebe o código de verificação e finaliza o login.
+    Suporta tanto web sessions quanto instagrapi sessions.
     """
     data = request.json
     code = str(data.get('code') or '').strip()
@@ -1992,13 +2027,117 @@ def instagram_verify():
     if not pending:
         return jsonify({"success": False, "error": "Nenhuma sessão pendente. Refaça o login."}), 400
 
-    cl = pending["client"]
     ig_username = pending["username"]
+
+    # --- Verificação via Web API ---
+    if pending.get("login_method") == "web":
+        try:
+            web_session = pending["web_session"]
+            checkpoint_url = pending.get("checkpoint_url", "")
+            csrf = pending.get("csrf", "")
+            ig_password = pending.get("password", "")
+
+            # Resolver checkpoint via web
+            if checkpoint_url:
+                # Acessar a página de checkpoint
+                full_url = f"https://www.instagram.com{checkpoint_url}" if checkpoint_url.startswith('/') else checkpoint_url
+                web_session.headers['X-CSRFToken'] = csrf
+                r_checkpoint = web_session.get(full_url, timeout=15)
+                # Atualizar CSRF se necessário
+                new_csrf = web_session.cookies.get('csrftoken', csrf)
+                web_session.headers['X-CSRFToken'] = new_csrf
+
+                time.sleep(random.uniform(1.5, 3.0))
+
+                # Enviar código de verificação
+                r_verify = web_session.post(full_url, data={
+                    'security_code': code,
+                }, timeout=15)
+
+                verify_data = {}
+                try:
+                    verify_data = r_verify.json()
+                except Exception:
+                    pass
+
+                print(f"[IG VERIFY] Web checkpoint response: status={r_verify.status_code} data={str(verify_data)[:200]}")
+
+                web_sessionid = web_session.cookies.get('sessionid', '')
+
+                if web_sessionid:
+                    # Checkpoint resolvido! Converter para Instagrapi
+                    cl = _create_instagram_client(for_login=False)
+                    cl.login_by_sessionid(web_sessionid)
+                    _save_instagram_session(current_user.id, ig_username, cl)
+                    PENDING_INSTA_CLIENTS.pop(current_user.id, None)
+                    log_action(current_user.id, f"verificou e conectou o Instagram <b>@{ig_username}</b>", current_user.pipeline_id)
+                    return jsonify({"success": True, "status": "connected", "ig_username": ig_username})
+
+                # Se não obteve sessionid, tentar re-login após verificação
+                time.sleep(random.uniform(2.0, 4.0))
+                login_resp = web_session.post('https://www.instagram.com/accounts/login/ajax/', data={
+                    'username': ig_username,
+                    'enc_password': f'#PWD_INSTAGRAM_BROWSER:0:{int(time.time())}:{ig_password}',
+                    'queryParams': '{}',
+                    'optIntoOneTap': 'false',
+                }, timeout=15)
+
+                login_data = {}
+                try:
+                    login_data = login_resp.json()
+                except Exception:
+                    pass
+
+                web_sessionid = web_session.cookies.get('sessionid', '')
+                if login_data.get('authenticated') and web_sessionid:
+                    cl = _create_instagram_client(for_login=False)
+                    cl.login_by_sessionid(web_sessionid)
+                    _save_instagram_session(current_user.id, ig_username, cl)
+                    PENDING_INSTA_CLIENTS.pop(current_user.id, None)
+                    log_action(current_user.id, f"verificou e conectou o Instagram <b>@{ig_username}</b>", current_user.pipeline_id)
+                    return jsonify({"success": True, "status": "connected", "ig_username": ig_username})
+
+                return jsonify({"success": False, "error": "Código verificado mas não foi possível completar o login. Tente novamente."}), 400
+
+            # 2FA via web
+            two_factor_info = pending.get("two_factor_info", {})
+            if two_factor_info:
+                identifier = two_factor_info.get('two_factor_identifier', '')
+                web_session.headers['X-CSRFToken'] = web_session.cookies.get('csrftoken', csrf)
+                r_2fa = web_session.post('https://www.instagram.com/accounts/login/ajax/two_factor/', data={
+                    'username': ig_username,
+                    'verificationCode': code,
+                    'identifier': identifier,
+                }, timeout=15)
+                tfa_data = {}
+                try:
+                    tfa_data = r_2fa.json()
+                except Exception:
+                    pass
+
+                web_sessionid = web_session.cookies.get('sessionid', '')
+                if tfa_data.get('authenticated') and web_sessionid:
+                    cl = _create_instagram_client(for_login=False)
+                    cl.login_by_sessionid(web_sessionid)
+                    _save_instagram_session(current_user.id, ig_username, cl)
+                    PENDING_INSTA_CLIENTS.pop(current_user.id, None)
+                    log_action(current_user.id, f"verificou e conectou o Instagram <b>@{ig_username}</b>", current_user.pipeline_id)
+                    return jsonify({"success": True, "status": "connected", "ig_username": ig_username})
+
+                return jsonify({"success": False, "error": "Código de 2FA inválido ou expirado."}), 400
+
+        except Exception as e:
+            print(f"[IG VERIFY] Erro web: {type(e).__name__}: {str(e)[:300]}")
+            return jsonify({"success": False, "error": f"Erro na verificação: {str(e)}"}), 400
+
+    # --- Verificação via Instagrapi (legado) ---
+    cl = pending.get("client")
+    if not cl:
+        return jsonify({"success": False, "error": "Sessão inválida. Refaça o login."}), 400
 
     try:
         cl.challenge_code_handler = lambda username, choice: code
         cl.challenge_resolve(cl.last_json)
-        # Sessão resolvida — salvar
         _save_instagram_session(current_user.id, ig_username, cl)
         PENDING_INSTA_CLIENTS.pop(current_user.id, None)
         log_action(current_user.id, f"verificou e conectou o Instagram <b>@{ig_username}</b>", current_user.pipeline_id)
