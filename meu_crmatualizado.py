@@ -1246,6 +1246,82 @@ def _oauth_result_page(success, message):
     return resp
 
 
+@app.route('/api/instagram/oauth/exchange', methods=['POST'])
+@login_required
+def instagram_oauth_exchange():
+    """Recebe o User Token do Facebook JS SDK e troca por Page Token permanente."""
+    data = request.json
+    short_token = data.get('token')
+    if not short_token:
+        return jsonify({"success": False, "error": "Token não fornecido."})
+
+    try:
+        # 1. Trocar por Long-lived User Token (60 dias)
+        ll_resp = requests.get(f"{GRAPH_URL}/oauth/access_token", params={
+            'grant_type': 'fb_exchange_token',
+            'client_id': META_APP_ID,
+            'client_secret': META_APP_SECRET,
+            'fb_exchange_token': short_token
+        })
+        ll_data = ll_resp.json()
+        if 'error' in ll_data:
+            raise Exception(ll_data['error'].get('message', 'Erro ao gerar token de longa duração'))
+        long_lived_token = ll_data['access_token']
+
+        # 2. Buscar Pages e pegar o Page Token permanente
+        pages_resp = requests.get(f"{GRAPH_URL}/me/accounts", params={
+            'fields': 'id,name,access_token,instagram_business_account',
+            'access_token': long_lived_token
+        })
+        pages_data = pages_resp.json()
+        if 'error' in pages_data:
+            raise Exception(pages_data['error'].get('message', 'Erro ao buscar páginas'))
+
+        pages = pages_data.get('data', [])
+        if not pages:
+            return jsonify({"success": False, "error": "Nenhuma Página do Facebook encontrada. Vincule uma página ao seu Instagram Business."})
+
+        # Encontrar a página com Instagram Business vinculado
+        page_token = None
+        page_id = None
+        page_name = None
+
+        for page in pages:
+            if 'instagram_business_account' in page:
+                page_token = page['access_token']
+                page_id = page['id']
+                page_name = page.get('name', 'Página')
+                break
+
+        if not page_token:
+            for page in pages:
+                pid = page['id']
+                check = requests.get(f"{GRAPH_URL}/{pid}", params={
+                    'fields': 'instagram_business_account',
+                    'access_token': page['access_token']
+                }).json()
+                if 'instagram_business_account' in check:
+                    page_token = page['access_token']
+                    page_id = pid
+                    page_name = page.get('name', 'Página')
+                    break
+
+        if not page_token:
+            return jsonify({"success": False, "error": "Nenhuma conta Instagram Business vinculada às suas páginas."})
+
+        # 3. Salvar no banco
+        conn = get_db()
+        conn.execute("UPDATE users SET meta_token = ?, ig_page_id = ? WHERE id = ?", (page_token, page_id, current_user.id))
+        conn.commit()
+        conn.close()
+
+        log_action(current_user.id, f"conectou Instagram via API Oficial ({page_name})", current_user.pipeline_id)
+        return jsonify({"success": True, "page_name": page_name, "page_id": page_id})
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
 @app.route('/api/instagram/connect', methods=['POST'])
 @login_required
 def connect_instagram():
