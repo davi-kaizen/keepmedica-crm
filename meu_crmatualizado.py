@@ -77,7 +77,7 @@ limiter = Limiter(
 )
 
 # URL BASE DA API DA META
-GRAPH_URL = "https://graph.facebook.com/v18.0"
+GRAPH_URL = "https://graph.facebook.com/v24.0"
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -451,7 +451,7 @@ def worker_fetch_leads(user_id, meta_token, ig_page_id):
         
     try:
         url = f"{GRAPH_URL}/{ig_page_id}/conversations"
-        params = {'fields': 'id,updated_time,messages{message,from,created_time},participants', 'access_token': meta_token, 'limit': 20}
+        params = {'platform': 'instagram', 'fields': 'id,updated_time,messages{message,from,created_time},participants', 'access_token': meta_token, 'limit': 20}
         resp = requests.get(url, params=params)
         data = resp.json()
         
@@ -1091,47 +1091,52 @@ def update_lead_details():
 def connect_instagram():
     data = request.json
     token = data.get('token')
+    page_id = data.get('page_id')
     if not token:
         return jsonify({"success": False, "error": "Token não fornecido."})
-        
-    try:
-        params = {'fields': 'instagram_business_account,id,name', 'access_token': token}
-        resp = requests.get(f"{GRAPH_URL}/me", params=params)
-        data_me = resp.json()
-        ig_page_id = None
-        
-        if 'instagram_business_account' in data_me:
-            ig_page_id = data_me['instagram_business_account']['id']
-        
-        if not ig_page_id:
-            if 'error' in data_me and data_me['error']['code'] == 100:
-                pass
-            resp_accounts = requests.get(f"{GRAPH_URL}/me/accounts", params={'access_token': token})
-            data_accounts = resp_accounts.json()
-            
-            if 'error' in data_accounts:
-                raise Exception(data_me.get('error', {}).get('message', data_accounts['error']['message']))
-                
-            pages = data_accounts.get('data', [])
-            for page in pages:
-                pid = page['id']
-                p_resp = requests.get(f"{GRAPH_URL}/{pid}", params={'fields': 'instagram_business_account', 'access_token': token})
-                p_data = p_resp.json()
-                if 'instagram_business_account' in p_data:
-                    ig_page_id = p_data['instagram_business_account']['id']
-                    break
 
-        if not ig_page_id:
-            return jsonify({"success": False, "error": "Nenhuma conta Instagram Business encontrada vinculada."})
-            
+    try:
+        # Se page_id foi fornecido diretamente (token permanente), pular discovery
+        if page_id:
+            ig_page_id = page_id
+        else:
+            params = {'fields': 'instagram_business_account,id,name', 'access_token': token}
+            resp = requests.get(f"{GRAPH_URL}/me", params=params)
+            data_me = resp.json()
+            ig_page_id = None
+
+            if 'instagram_business_account' in data_me:
+                ig_page_id = data_me['instagram_business_account']['id']
+
+            if not ig_page_id:
+                if 'error' in data_me and data_me['error']['code'] == 100:
+                    pass
+                resp_accounts = requests.get(f"{GRAPH_URL}/me/accounts", params={'access_token': token})
+                data_accounts = resp_accounts.json()
+
+                if 'error' in data_accounts:
+                    raise Exception(data_me.get('error', {}).get('message', data_accounts['error']['message']))
+
+                pages = data_accounts.get('data', [])
+                for page in pages:
+                    pid = page['id']
+                    p_resp = requests.get(f"{GRAPH_URL}/{pid}", params={'fields': 'instagram_business_account', 'access_token': token})
+                    p_data = p_resp.json()
+                    if 'instagram_business_account' in p_data:
+                        ig_page_id = p_data['instagram_business_account']['id']
+                        break
+
+            if not ig_page_id:
+                return jsonify({"success": False, "error": "Nenhuma conta Instagram Business encontrada vinculada."})
+
         conn = get_db()
         conn.execute("UPDATE users SET meta_token = ?, ig_page_id = ? WHERE id = ?", (token, ig_page_id, current_user.id))
         conn.commit()
         conn.close()
-        
+
         log_action(current_user.id, "conectou uma conta do Instagram", current_user.pipeline_id)
         return jsonify({"success": True, "page_id": ig_page_id})
-        
+
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
@@ -1179,46 +1184,65 @@ def c_lead():
 @login_required
 def chat_th():
     if not current_user.meta_token:
-        return jsonify({"success": False, "error": "Instagram não conectado"})
-        
+        return jsonify({"success": False, "error": "Instagram não conectado. Conecte via Configurações."})
+
     try:
         url = f"{GRAPH_URL}/{current_user.ig_page_id}/conversations"
-        params = {'access_token': current_user.meta_token, 'limit': 15, 'fields': 'participants,updated_time,messages{message}'}
+        params = {
+            'platform': 'instagram',
+            'access_token': current_user.meta_token,
+            'limit': 20,
+            'fields': 'participants,updated_time,messages.limit(1){message,from,created_time}'
+        }
         resp = requests.get(url, params=params)
         data = resp.json()
-        
+
         if 'error' in data:
             raise Exception(data['error']['message'])
-            
+
         conversations = data.get('data', [])
-        
+
         c = get_db()
         leads_q = c.execute("SELECT l.username,l.status,s.color FROM leads l JOIN stages s ON l.status=s.name AND l.pipeline_id=s.pipeline_id WHERE l.pipeline_id=?", (current_user.pipeline_id,)).fetchall()
         c.close()
-        
+
         l_map = {r['username']: {'status': r['status'], 'color': r['color']} for r in leads_q}
         res = []
-        
+        page_id = current_user.ig_page_id
+
         for t in conversations:
             parts = t.get('participants', {}).get('data', [])
-            u = parts[0] if parts else None
+            # Filtrar o participante que NÃO é a página (é o cliente)
+            u = None
+            for p in parts:
+                if p.get('id') != page_id:
+                    u = p
+                    break
+            if not u:
+                u = parts[0] if parts else None
             if not u:
                 continue
-                
-            last_msg = t.get('messages', {}).get('data', [{}])[0].get('message', '')
+
+            msgs_data = t.get('messages', {}).get('data', [])
+            last_msg_obj = msgs_data[0] if msgs_data else {}
+            last_msg = last_msg_obj.get('message', '')
+            last_time = last_msg_obj.get('created_time', t.get('updated_time', ''))
+
             res.append({
-                "thread_id": t['id'], 
+                "thread_id": t['id'],
+                "user_id": u.get('id', ''),
                 "user": {
-                    "name": u.get('name', 'User'), 
-                    "username": u.get('username', 'user'), 
+                    "name": u.get('name', 'Usuário'),
+                    "username": u.get('username', u.get('name', 'user')),
                     "pic": ""
-                }, 
-                "last_msg": last_msg[:40], 
+                },
+                "last_msg": last_msg[:60] if last_msg else '',
+                "updated_time": last_time,
                 "lead_info": l_map.get(u.get('username', ''))
             })
-            
+
         return jsonify({"success": True, "threads": res})
-        
+
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
@@ -1228,31 +1252,72 @@ def chat_ms():
     tid = request.args.get('thread_id')
     if not tid:
         return jsonify({"success": False})
-        
+
     try:
         url = f"{GRAPH_URL}/{tid}/messages"
-        params = {'access_token': current_user.meta_token, 'fields': 'message,from,created_time', 'limit': 20}
+        params = {
+            'access_token': current_user.meta_token,
+            'fields': 'message,from,created_time',
+            'limit': 50
+        }
         resp = requests.get(url, params=params)
         data = resp.json()
+
+        if 'error' in data:
+            raise Exception(data['error']['message'])
+
         msgs = []
-        
+        page_id = current_user.ig_page_id
+
         for m in data.get('data', []):
             sender_id = m.get('from', {}).get('id')
-            is_me = (sender_id == current_user.ig_page_id)
+            is_me = (sender_id == page_id)
+            created = m.get('created_time', '')
             msgs.append({
-                "text": m.get('message', '[Mídia]'), 
-                "is_sent_by_me": is_me
+                "id": m.get('id', ''),
+                "text": m.get('message', '[Mídia]'),
+                "is_sent_by_me": is_me,
+                "sender_name": m.get('from', {}).get('name', ''),
+                "created_time": created
             })
-            
+
+        # Graph API retorna do mais recente pro mais antigo, inverter
+        msgs.reverse()
         return jsonify({"success": True, "messages": msgs})
-        
+
     except Exception as e:
-        return jsonify({"success": False})
+        return jsonify({"success": False, "error": str(e)})
 
 @app.route('/api/chat/send', methods=['POST'])
 @login_required
 def chat_sd():
-    return jsonify({"success": False, "error": "Envio via API Oficial requer implementação complexa de IDs."})
+    if not current_user.meta_token:
+        return jsonify({"success": False, "error": "Instagram não conectado."})
+
+    data = request.json
+    recipient_id = data.get('recipient_id')
+    text = data.get('text', '').strip()
+
+    if not recipient_id or not text:
+        return jsonify({"success": False, "error": "Destinatário e mensagem são obrigatórios."})
+
+    try:
+        url = f"{GRAPH_URL}/{current_user.ig_page_id}/messages"
+        payload = {
+            "recipient": {"id": recipient_id},
+            "message": {"text": text},
+            "access_token": current_user.meta_token
+        }
+        resp = requests.post(url, json=payload)
+        result = resp.json()
+
+        if 'error' in result:
+            raise Exception(result['error']['message'])
+
+        return jsonify({"success": True, "message_id": result.get('message_id', '')})
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
 # ==============================================================================
 # ENDPOINTS EXCLUSIVOS PARA O FRONTEND NEXT.JS (V2)
