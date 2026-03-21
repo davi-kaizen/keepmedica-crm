@@ -1111,7 +1111,6 @@ def instagram_oauth_url():
         f"&redirect_uri={redirect_uri}"
         f"&scope={META_OAUTH_SCOPES}"
         f"&response_type=code"
-        f"&auth_type=rerequest"
         f"&display=popup"
     )
     return jsonify({"url": oauth_url, "redirect_uri": redirect_uri})
@@ -1206,14 +1205,34 @@ def instagram_oauth_callback():
         if not page_token:
             return _oauth_result_page(False, 'Nenhuma conta Instagram Business vinculada às suas páginas.')
 
-        # 4. Salvar no banco para TODOS os usuários admin (ou o primeiro)
+        # 4. Tentar buscar o username do Instagram Business para exibir no frontend
+        ig_username = page_name  # fallback para o nome da página
+        try:
+            # Buscar o IG business account ID da página
+            ig_check = requests.get(f"{GRAPH_URL}/{page_id}", params={
+                'fields': 'instagram_business_account',
+                'access_token': page_token
+            }).json()
+            ig_account_id = ig_check.get('instagram_business_account', {}).get('id')
+            if ig_account_id:
+                # Buscar username do Instagram
+                ig_info = requests.get(f"{GRAPH_URL}/{ig_account_id}", params={
+                    'fields': 'username,name',
+                    'access_token': page_token
+                }).json()
+                if ig_info.get('username'):
+                    ig_username = ig_info['username']
+        except Exception:
+            pass  # Usar page_name como fallback
+
+        # 5. Salvar no banco para TODOS os usuários admin (ou o primeiro)
         conn = get_db()
         # Salvar para todos os usuários que existem
         conn.execute("UPDATE users SET meta_token = ?, ig_page_id = ?", (page_token, page_id))
         conn.commit()
         conn.close()
 
-        return _oauth_result_page(True, page_name)
+        return _oauth_result_page(True, ig_username)
 
     except Exception as e:
         return _oauth_result_page(False, str(e))
@@ -1224,30 +1243,50 @@ def _oauth_result_page(success, message):
     status = 'success' if success else 'error'
     # Escapar aspas na mensagem para evitar XSS
     safe_message = message.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"').replace('\n', ' ')
+    icon_html = '&#10004;' if success else '&#10008;'
+    icon_color = '#22c55e' if success else '#ef4444'
+    title_text = 'Conectado!' if success else 'Erro'
     html = f"""<!DOCTYPE html>
-<html><head><title>Instagram - KeepMedica</title>
+<html><head>
+<meta charset="utf-8">
+<title>Instagram - KeepMedica</title>
 <style>
-    body {{ font-family: -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #0f172a; color: white; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #0f172a; color: white; }}
     .card {{ text-align: center; padding: 40px; }}
-    .icon {{ font-size: 48px; margin-bottom: 16px; }}
+    .icon {{ font-size: 48px; margin-bottom: 16px; color: {icon_color}; }}
     .msg {{ font-size: 14px; color: #94a3b8; margin-top: 8px; }}
 </style></head>
 <body>
     <div class="card">
-        <div class="icon">{'✅' if success else '❌'}</div>
-        <h2>{'Conectado!' if success else 'Erro'}</h2>
+        <div class="icon">{icon_html}</div>
+        <h2>{title_text}</h2>
         <p class="msg">{safe_message}</p>
-        <p class="msg">Fechando...</p>
+        <p class="msg" id="closing">Fechando em 3s...</p>
     </div>
     <script>
-        if (window.opener) {{
-            window.opener.postMessage({{ type: 'instagram_oauth', status: '{status}', message: '{safe_message}' }}, '*');
-        }}
-        setTimeout(function() {{ window.close(); }}, 2000);
+        (function() {{
+            var data = {{ type: 'instagram_oauth', status: '{status}', message: '{safe_message}' }};
+            try {{
+                if (window.opener && !window.opener.closed) {{
+                    window.opener.postMessage(data, '*');
+                }}
+            }} catch(e) {{}}
+            var countdown = 3;
+            var timer = setInterval(function() {{
+                countdown--;
+                if (countdown <= 0) {{
+                    clearInterval(timer);
+                    window.close();
+                }} else {{
+                    var el = document.getElementById('closing');
+                    if (el) el.textContent = 'Fechando em ' + countdown + 's...';
+                }}
+            }}, 1000);
+        }})();
     </script>
 </body></html>"""
     resp = make_response(html)
-    resp.headers['Content-Type'] = 'text/html'
+    resp.headers['Content-Type'] = 'text/html; charset=utf-8'
     return resp
 
 
@@ -2504,7 +2543,24 @@ def instagram_status():
     """Verifica se o usuário tem Instagram conectado (Graph API ou sessão legada)."""
     # Verificar Graph API (token permanente) primeiro
     if current_user.meta_token and current_user.ig_page_id:
-        return jsonify({"connected": True, "ig_username": "Instagram Business", "method": "graph_api"})
+        # Tentar buscar o username real do Instagram
+        ig_display_name = "Instagram Business"
+        try:
+            ig_check = requests.get(f"{GRAPH_URL}/{current_user.ig_page_id}", params={
+                'fields': 'instagram_business_account',
+                'access_token': current_user.meta_token
+            }).json()
+            ig_account_id = ig_check.get('instagram_business_account', {}).get('id')
+            if ig_account_id:
+                ig_info = requests.get(f"{GRAPH_URL}/{ig_account_id}", params={
+                    'fields': 'username,name',
+                    'access_token': current_user.meta_token
+                }).json()
+                if ig_info.get('username'):
+                    ig_display_name = ig_info['username']
+        except Exception:
+            pass
+        return jsonify({"connected": True, "ig_username": ig_display_name, "method": "graph_api"})
 
     # Fallback: verificar sessão Instagrapi legada
     conn = get_db()

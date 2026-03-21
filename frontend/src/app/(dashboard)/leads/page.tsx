@@ -173,6 +173,7 @@ export default function LeadsPage() {
     const [igSelectedThreads, setIgSelectedThreads] = useState<Set<string>>(new Set());
     const [igImportResult, setIgImportResult] = useState('');
     const [igSessionToken, setIgSessionToken] = useState('');
+    const [igThreadsLoading, setIgThreadsLoading] = useState(false);
 
     // Chat state
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -412,11 +413,10 @@ export default function LeadsPage() {
     // --- Instagram handlers ---
     const openIgModal = () => {
         if (igConnected) {
-            setIgStep('threads');
+            setIgStep('success');
             setIgError('');
             setIgSelectedThreads(new Set());
             setShowIgModal(true);
-            fetchIgThreads();
         } else {
             setIgStep('login');
             setIgUsername('');
@@ -475,15 +475,39 @@ export default function LeadsPage() {
         setIgStep('threads');
         setIgThreads([]);
         setIgError('');
+        setIgThreadsLoading(true);
         try {
-            const res = await fetchApi('/chat/threads');
-            if (!res.success) { setIgError(res.error || 'Erro ao buscar conversas.'); return; }
-            setIgThreads((res.threads || []).map((t: Record<string, unknown>) => ({
-                thread_id: t.thread_id,
-                user: t.user,
-                last_msg: t.last_msg || '',
-            })));
-        } catch { setIgError('Erro de conexao com o servidor.'); }
+            // Add timeout of 30 seconds
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+            const res = await fetchApi('/chat/threads', { signal: controller.signal });
+            clearTimeout(timeoutId);
+            if (!res.success) {
+                setIgError(res.error || 'Erro ao buscar conversas.');
+                setIgThreadsLoading(false);
+                return;
+            }
+            const threads = (res.threads || []).map((t: Record<string, unknown>) => ({
+                thread_id: t.thread_id as string,
+                user_id: (t.user_id || '') as string,
+                username: (t.username || t.user || '') as string,
+                full_name: (t.full_name || t.user || '') as string,
+                profile_pic: (t.profile_pic || '') as string,
+                last_message: (t.last_message || t.last_msg || '') as string,
+            }));
+            setIgThreads(threads);
+            if (threads.length === 0) {
+                setIgError('Nenhuma conversa encontrada no Instagram.');
+            }
+        } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') {
+                setIgError('Tempo esgotado ao buscar conversas. Tente novamente.');
+            } else {
+                setIgError('Erro de conexao com o servidor. Verifique se o backend esta rodando.');
+            }
+        } finally {
+            setIgThreadsLoading(false);
+        }
     };
 
     const toggleThreadSelection = (threadId: string) => {
@@ -1585,7 +1609,7 @@ export default function LeadsPage() {
                                         </div>
                                         <div className="text-center">
                                             <h4 className="text-lg font-bold text-slate-900 dark:text-white">Conta Conectada!</h4>
-                                            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1"><i className="fab fa-instagram mr-1"></i>@{igConnectedUser}</p>
+                                            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1"><i className="fab fa-instagram mr-1"></i>{igConnectedUser ? `@${igConnectedUser}` : 'Instagram Business'}</p>
                                         </div>
                                         <div className="flex gap-3 w-full pt-2">
                                             <button onClick={() => { fetchIgThreads(); }}
@@ -1616,15 +1640,28 @@ export default function LeadsPage() {
                                         </div>
 
                                         {igError && (
-                                            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm rounded-xl px-4 py-3 flex items-center gap-2">
-                                                <i className="fas fa-exclamation-circle"></i>{igError}
+                                            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm rounded-xl px-4 py-3">
+                                                <div className="flex items-center gap-2">
+                                                    <i className="fas fa-exclamation-circle"></i>{igError}
+                                                </div>
+                                                <button onClick={fetchIgThreads} className="mt-2 text-xs text-red-500 hover:text-red-700 dark:hover:text-red-300 underline cursor-pointer font-medium">
+                                                    <i className="fas fa-redo mr-1"></i>Tentar novamente
+                                                </button>
                                             </div>
                                         )}
 
-                                        {igThreads.length === 0 && !igError ? (
+                                        {igThreadsLoading ? (
                                             <div className="flex flex-col items-center py-10 space-y-3">
                                                 <div className="w-12 h-12 border-4 border-slate-200 dark:border-slate-600 border-t-brand rounded-full animate-spin"></div>
                                                 <p className="text-sm text-slate-500 dark:text-slate-400">Buscando conversas...</p>
+                                            </div>
+                                        ) : igThreads.length === 0 && !igError ? (
+                                            <div className="flex flex-col items-center py-10 space-y-3 text-center">
+                                                <i className="fas fa-inbox text-4xl text-slate-300 dark:text-slate-600"></i>
+                                                <p className="text-sm text-slate-500 dark:text-slate-400">Nenhuma conversa encontrada.</p>
+                                                <button onClick={fetchIgThreads} className="text-sm text-brand hover:underline cursor-pointer font-medium">
+                                                    <i className="fas fa-redo mr-1"></i>Tentar novamente
+                                                </button>
                                             </div>
                                         ) : (
                                             <div className="space-y-1.5 max-h-[350px] overflow-y-auto pr-1">
