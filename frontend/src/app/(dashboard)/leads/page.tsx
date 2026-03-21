@@ -427,69 +427,48 @@ export default function LeadsPage() {
         }
     };
 
-    const handleIgOAuth = () => {
+    const handleIgOAuth = async () => {
         setIgError('');
         setIgStep('loading');
 
-        // Carregar Facebook SDK se ainda não carregou
-        const doLogin = () => {
-            const FB = (window as unknown as Record<string, unknown>).FB as {
-                login: (cb: (response: { authResponse?: { accessToken: string } | null; status: string }) => void, opts: { scope: string }) => void;
-            } | undefined;
+        try {
+            // Pegar URL de OAuth do backend
+            const res = await fetchApi('/instagram/oauth/url');
+            if (!res.url) { setIgError('Erro ao gerar URL.'); setIgStep('login'); return; }
 
-            if (!FB) {
-                setIgError('Erro ao carregar SDK do Facebook. Recarregue a página.');
-                setIgStep('login');
-                return;
-            }
+            // Abrir popup com o login da Meta/Instagram
+            const w = 600, h = 750;
+            const left = window.screenX + (window.outerWidth - w) / 2;
+            const top = window.screenY + (window.outerHeight - h) / 2;
+            const popup = window.open(res.url, 'instagram_oauth', `width=${w},height=${h},left=${left},top=${top},scrollbars=yes`);
 
-            FB.login((response) => {
-                if (response.authResponse?.accessToken) {
-                    // Enviar token pro backend trocar por Page Token permanente
-                    fetchApi('/instagram/oauth/exchange', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ token: response.authResponse.accessToken })
-                    }).then(data => {
-                        if (data.success) {
-                            setIgConnected(true);
-                            setIgConnectedUser(data.page_name || 'Instagram Business');
-                            setIgStep('success');
-                        } else {
-                            setIgError(data.error || 'Erro ao conectar.');
-                            setIgStep('login');
-                        }
-                    }).catch(() => {
-                        setIgError('Erro de conexao com o servidor.');
+            // Escutar resultado do popup via postMessage
+            const handleMessage = (event: MessageEvent) => {
+                if (event.data?.type === 'instagram_oauth') {
+                    window.removeEventListener('message', handleMessage);
+                    if (event.data.status === 'success') {
+                        setIgConnected(true);
+                        setIgConnectedUser(event.data.message || 'Instagram Business');
+                        setIgStep('success');
+                    } else {
+                        setIgError(event.data.message || 'Erro na autorizacao.');
                         setIgStep('login');
-                    });
-                } else {
-                    setIgError('Login cancelado ou nao autorizado.');
-                    setIgStep('login');
+                    }
                 }
-            }, {
-                scope: 'pages_show_list,instagram_basic,instagram_manage_messages,pages_messaging,pages_read_engagement,pages_manage_metadata,business_management'
-            });
-        };
-
-        // Verificar se SDK já está carregado
-        if ((window as unknown as Record<string, unknown>).FB) {
-            doLogin();
-            return;
-        }
-
-        // Carregar SDK dinamicamente
-        (window as unknown as Record<string, unknown>).fbAsyncInit = () => {
-            const FB = (window as unknown as Record<string, unknown>).FB as {
-                init: (opts: { appId: string; cookie: boolean; xfbml: boolean; version: string }) => void;
             };
-            FB.init({ appId: '894347883583271', cookie: true, xfbml: false, version: 'v24.0' });
-            doLogin();
-        };
-        const script = document.createElement('script');
-        script.src = 'https://connect.facebook.net/pt_BR/sdk.js';
-        script.async = true;
-        document.body.appendChild(script);
+            window.addEventListener('message', handleMessage);
+
+            // Detectar se popup foi fechado sem completar
+            const checkClosed = setInterval(() => {
+                if (popup && popup.closed) {
+                    clearInterval(checkClosed);
+                    setTimeout(() => {
+                        window.removeEventListener('message', handleMessage);
+                        setIgStep(prev => prev === 'loading' ? 'login' : prev);
+                    }, 1000);
+                }
+            }, 500);
+        } catch { setIgError('Erro de conexao com o servidor.'); setIgStep('login'); }
     };
 
     const fetchIgThreads = async () => {

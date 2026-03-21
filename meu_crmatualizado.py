@@ -1100,9 +1100,10 @@ def update_lead_details():
 @login_required
 def instagram_oauth_url():
     """Retorna a URL de autorização OAuth da Meta para abrir no popup."""
-    # Detectar base URL automaticamente
-    host = request.host_url.rstrip('/')
-    redirect_uri = f"{host}/api/instagram/oauth/callback"
+    # Usar HTTPS do domínio configurado ou detectar automaticamente
+    proto = request.headers.get('X-Forwarded-Proto', 'http')
+    host = request.headers.get('X-Forwarded-Host', request.host)
+    redirect_uri = f"{proto}://{host}/api/instagram/oauth/callback"
 
     oauth_url = (
         f"https://www.facebook.com/v24.0/dialog/oauth"
@@ -1110,6 +1111,8 @@ def instagram_oauth_url():
         f"&redirect_uri={redirect_uri}"
         f"&scope={META_OAUTH_SCOPES}"
         f"&response_type=code"
+        f"&auth_type=rerequest"
+        f"&display=popup"
     )
     return jsonify({"url": oauth_url, "redirect_uri": redirect_uri})
 
@@ -1128,8 +1131,9 @@ def instagram_oauth_callback():
         return _oauth_result_page(False, 'Código de autorização não recebido')
 
     try:
-        host = request.host_url.rstrip('/')
-        redirect_uri = f"{host}/api/instagram/oauth/callback"
+        proto = request.headers.get('X-Forwarded-Proto', 'http')
+        host = request.headers.get('X-Forwarded-Host', request.host)
+        redirect_uri = f"{proto}://{host}/api/instagram/oauth/callback"
 
         # 1. Trocar code por short-lived User Token
         token_resp = requests.get(f"{GRAPH_URL}/oauth/access_token", params={
