@@ -1366,6 +1366,91 @@ def instagram_oauth_exchange():
         return jsonify({"success": False, "error": str(e)})
 
 
+# Webhook verify token (can be any string, we'll use this)
+WEBHOOK_VERIFY_TOKEN = "keepmedica_webhook_2026"
+
+@app.route('/api/instagram/webhook', methods=['GET'])
+def instagram_webhook_verify():
+    """Verification endpoint for Meta webhook setup."""
+    mode = request.args.get('hub.mode')
+    token = request.args.get('hub.verify_token')
+    challenge = request.args.get('hub.challenge')
+
+    if mode == 'subscribe' and token == WEBHOOK_VERIFY_TOKEN:
+        return challenge, 200
+    return 'Forbidden', 403
+
+@app.route('/api/instagram/webhook', methods=['POST'])
+def instagram_webhook_receive():
+    """Receive real-time Instagram message events."""
+    data = request.json
+    if not data:
+        return 'OK', 200
+
+    # Process messaging events
+    for entry in data.get('entry', []):
+        for messaging in entry.get('messaging', []):
+            sender_id = messaging.get('sender', {}).get('id')
+            recipient_id = messaging.get('recipient', {}).get('id')
+            message = messaging.get('message', {})
+            msg_text = message.get('text', '')
+
+            if sender_id and msg_text:
+                # Store as notification/update lead
+                try:
+                    conn = get_db()
+                    # Find leads with this sender's thread
+                    # Update unread count
+                    conn.execute("""
+                        UPDATE leads SET last_msg = ?, unread_count = COALESCE(unread_count, 0) + 1,
+                        last_interaction = datetime('now')
+                        WHERE thread_id = ? OR username = ?
+                    """, (msg_text, sender_id, sender_id))
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    print(f"[WEBHOOK] Error processing message: {e}")
+
+    return 'OK', 200
+
+@app.route('/api/instagram/webhook/status')
+@login_required
+def instagram_webhook_status():
+    """Check if webhook is configured for the Instagram account."""
+    if not current_user.meta_token:
+        return jsonify({"configured": False, "error": "Instagram não conectado"})
+
+    try:
+        # Check subscribed fields
+        resp = requests.get(f"{GRAPH_URL}/{current_user.ig_page_id}/subscribed_apps", params={
+            'access_token': current_user.meta_token
+        })
+        data = resp.json()
+        subscribed = len(data.get('data', [])) > 0
+        return jsonify({"configured": subscribed, "data": data.get('data', [])})
+    except Exception as e:
+        return jsonify({"configured": False, "error": str(e)})
+
+@app.route('/api/instagram/webhook/subscribe', methods=['POST'])
+@login_required
+def instagram_webhook_subscribe():
+    """Subscribe the page to receive messaging webhooks."""
+    if not current_user.meta_token:
+        return jsonify({"success": False, "error": "Instagram não conectado"})
+
+    try:
+        resp = requests.post(f"{GRAPH_URL}/{current_user.ig_page_id}/subscribed_apps", params={
+            'subscribed_fields': 'messages,messaging_postbacks',
+            'access_token': current_user.meta_token
+        })
+        data = resp.json()
+        if data.get('success'):
+            return jsonify({"success": True})
+        return jsonify({"success": False, "error": data.get('error', {}).get('message', 'Erro ao inscrever webhook')})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
 @app.route('/api/instagram/connect', methods=['POST'])
 @login_required
 def connect_instagram():

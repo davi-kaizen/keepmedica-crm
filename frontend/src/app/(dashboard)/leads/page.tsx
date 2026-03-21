@@ -496,9 +496,6 @@ export default function LeadsPage() {
                 last_message: (t.last_message || t.last_msg || '') as string,
             }));
             setIgThreads(threads);
-            if (threads.length === 0) {
-                setIgError('Nenhuma conversa encontrada no Instagram.');
-            }
         } catch (err) {
             if (err instanceof DOMException && err.name === 'AbortError') {
                 setIgError('Tempo esgotado ao buscar conversas. Tente novamente.');
@@ -1656,11 +1653,26 @@ export default function LeadsPage() {
                                                 <p className="text-sm text-slate-500 dark:text-slate-400">Buscando conversas...</p>
                                             </div>
                                         ) : igThreads.length === 0 && !igError ? (
-                                            <div className="flex flex-col items-center py-10 space-y-3 text-center">
-                                                <i className="fas fa-inbox text-4xl text-slate-300 dark:text-slate-600"></i>
-                                                <p className="text-sm text-slate-500 dark:text-slate-400">Nenhuma conversa encontrada.</p>
-                                                <button onClick={fetchIgThreads} className="text-sm text-brand hover:underline cursor-pointer font-medium">
-                                                    <i className="fas fa-redo mr-1"></i>Tentar novamente
+                                            <div className="flex flex-col items-center py-8 space-y-4 text-center px-4">
+                                                <div className="w-16 h-16 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                                                    <i className="fab fa-instagram text-blue-500 text-2xl"></i>
+                                                </div>
+                                                <div>
+                                                    <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Instagram conectado com sucesso!</p>
+                                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed max-w-xs mx-auto">
+                                                        As conversas aparecerao aqui quando alguem enviar uma mensagem no Instagram para <strong>@{igConnectedUser || 'sua conta'}</strong>.
+                                                    </p>
+                                                </div>
+                                                <div className="bg-slate-100 dark:bg-slate-700/50 rounded-xl px-4 py-3 text-left w-full max-w-xs">
+                                                    <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">Para testar agora:</p>
+                                                    <ol className="text-xs text-slate-500 dark:text-slate-400 space-y-1.5 list-decimal list-inside">
+                                                        <li>Abra outro celular ou conta do Instagram</li>
+                                                        <li>Envie uma DM para @{igConnectedUser || 'sua conta'}</li>
+                                                        <li>Volte aqui e clique em &quot;Atualizar&quot;</li>
+                                                    </ol>
+                                                </div>
+                                                <button onClick={fetchIgThreads} className="text-sm text-brand hover:underline cursor-pointer font-medium mt-2">
+                                                    <i className="fas fa-sync-alt mr-1"></i>Atualizar conversas
                                                 </button>
                                             </div>
                                         ) : (
