@@ -427,70 +427,21 @@ export default function LeadsPage() {
         }
     };
 
-    const handleIgLogin = async () => {
-        if (!igUsername.trim() || !igPassword) { setIgError('Preencha usuário e senha.'); return; }
+    const handleIgConnect = async () => {
+        if (!igSessionToken.trim()) { setIgError('Cole o Page Token da Meta.'); return; }
         setIgError('');
         setIgStep('loading');
         try {
-            const res = await fetchApi('/instagram/login', {
+            const res = await fetchApi('/instagram/connect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username: igUsername.trim(), password: igPassword }),
+                body: JSON.stringify({ token: igSessionToken.trim(), page_id: '995827020282407' }),
             });
-            if (!res.success && res.error) { setIgError(res.error); setIgStep('login'); return; }
-            if (res.status === 'connected') {
-                setIgConnected(true);
-                setIgConnectedUser(res.ig_username || igUsername);
-                setIgStep('success');
-            } else if (res.status === 'challenge_required' || res.status === 'two_factor_required') {
-                setIgChallengeMsg(res.message || 'Insira o código enviado para o seu e-mail.');
-                setIgStep('challenge');
-            }
-        } catch { setIgError('Erro de conexão com o servidor.'); setIgStep('login'); }
-    };
-
-    const handleIgVerify = async () => {
-        if (!igCode.trim()) { setIgError('Insira o código de verificação.'); return; }
-        setIgError('');
-        setIgStep('loading');
-        try {
-            const res = await fetchApi('/instagram/verify', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code: igCode.trim() }),
-            });
-            if (!res.success && res.error) { setIgError(res.error); setIgStep('challenge'); return; }
+            if (!res.success) { setIgError(res.error || 'Erro ao conectar.'); setIgStep('login'); return; }
             setIgConnected(true);
-            setIgConnectedUser(res.ig_username || igUsername);
+            setIgConnectedUser('Instagram Business');
             setIgStep('success');
-        } catch { setIgError('Erro de conexão com o servidor.'); setIgStep('challenge'); }
-    };
-
-    const handleIgExportSession = async () => {
-        setIgError('');
-        try {
-            const res = await fetchApi('/instagram/export_session');
-            if (!res.success) { setIgError(res.error || 'Erro ao exportar sessão.'); return; }
-            setIgSessionToken(res.token);
-            setIgStep('export_session');
-        } catch { setIgError('Erro de conexão com o servidor.'); }
-    };
-
-    const handleIgImportSession = async () => {
-        if (!igSessionToken.trim()) { setIgError('Cole o token de sessão.'); return; }
-        setIgError('');
-        setIgStep('loading');
-        try {
-            const res = await fetchApi('/instagram/import_session', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: igSessionToken.trim() }),
-            });
-            if (!res.success) { setIgError(res.error || 'Erro ao importar sessão.'); setIgStep('import_session'); return; }
-            setIgConnected(true);
-            setIgConnectedUser(res.ig_username);
-            setIgStep('success');
-        } catch { setIgError('Erro de conexão com o servidor.'); setIgStep('import_session'); }
+        } catch { setIgError('Erro de conexao com o servidor.'); setIgStep('login'); }
     };
 
     const fetchIgThreads = async () => {
@@ -498,10 +449,14 @@ export default function LeadsPage() {
         setIgThreads([]);
         setIgError('');
         try {
-            const res = await fetchApi('/instagram/threads');
+            const res = await fetchApi('/chat/threads');
             if (!res.success) { setIgError(res.error || 'Erro ao buscar conversas.'); return; }
-            setIgThreads(res.threads || []);
-        } catch { setIgError('Erro de conexão com o servidor.'); }
+            setIgThreads((res.threads || []).map((t: Record<string, unknown>) => ({
+                thread_id: t.thread_id,
+                user: t.user,
+                last_msg: t.last_msg || '',
+            })));
+        } catch { setIgError('Erro de conexao com o servidor.'); }
     };
 
     const toggleThreadSelection = (threadId: string) => {
@@ -1550,112 +1505,40 @@ export default function LeadsPage() {
 
                             {/* Modal Body */}
                             <div className="p-6 overflow-y-auto flex-1">
-                                {/* LOGIN */}
+                                {/* LOGIN - Meta Graph API */}
                                 {igStep === 'login' && (
                                     <div className="space-y-4">
-                                        <p className="text-sm text-slate-500 dark:text-slate-400">Insira suas credenciais do Instagram para conectar ao CRM.</p>
+                                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl px-4 py-3">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <i className="fas fa-shield-alt text-blue-500"></i>
+                                                <span className="text-sm font-bold text-blue-700 dark:text-blue-400">API Oficial da Meta</span>
+                                            </div>
+                                            <p className="text-xs text-blue-600 dark:text-blue-300">
+                                                Conexao segura via Meta Graph API. Sem risco de bloqueio de conta.
+                                                Cole o Page Token gerado no Graph API Explorer.
+                                            </p>
+                                        </div>
                                         {igError && (
-                                            <div className={`${igError.includes('IP') || igError.includes('datacenter') || igError.includes('proxy') ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-600 dark:text-red-400'} border text-sm rounded-xl px-4 py-3`}>
+                                            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 border text-sm rounded-xl px-4 py-3">
                                                 <div className="flex items-center gap-2">
-                                                    <i className={`fas ${igError.includes('IP') || igError.includes('datacenter') || igError.includes('proxy') ? 'fa-server' : 'fa-exclamation-circle'}`}></i>
-                                                    <span className="font-semibold">{igError.includes('IP') || igError.includes('datacenter') || igError.includes('proxy') ? 'Erro ao conectar: IP bloqueado' : 'Erro ao conectar'}</span>
+                                                    <i className="fas fa-exclamation-circle"></i>
+                                                    <span className="font-semibold">Erro ao conectar</span>
                                                 </div>
                                                 <p className="mt-1 text-xs opacity-90">{igError}</p>
                                             </div>
                                         )}
                                         <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Usuário do Instagram</label>
-                                            <div className="relative">
-                                                <i className="fas fa-at absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-                                                <input type="text" value={igUsername} onChange={e => setIgUsername(e.target.value)} placeholder="seu_usuario"
-                                                    className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-white rounded-xl focus:ring-2 focus:ring-pink-500/20 focus:border-pink-500 outline-none transition placeholder-slate-400"
-                                                    onKeyDown={e => e.key === 'Enter' && handleIgLogin()} />
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Senha</label>
-                                            <div className="relative">
-                                                <i className="fas fa-lock absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-                                                <input type="password" value={igPassword} onChange={e => setIgPassword(e.target.value)} placeholder="••••••••"
-                                                    className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-white rounded-xl focus:ring-2 focus:ring-pink-500/20 focus:border-pink-500 outline-none transition placeholder-slate-400"
-                                                    onKeyDown={e => e.key === 'Enter' && handleIgLogin()} />
-                                            </div>
-                                        </div>
-                                        <button onClick={handleIgLogin}
-                                            className="w-full bg-gradient-to-r from-pink-600 to-orange-500 text-white py-3 rounded-xl font-bold hover:opacity-90 transition active:scale-[0.98] cursor-pointer shadow-lg shadow-pink-500/20">
-                                            <i className="fas fa-paper-plane mr-2"></i>Solicitar Acesso
-                                        </button>
-                                        <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Suas credenciais são usadas apenas para autenticação.</p>
-                                        <div className="border-t border-slate-200 dark:border-slate-700 pt-3 mt-2">
-                                            <button onClick={() => { setIgStep('import_session'); setIgError(''); setIgSessionToken(''); }}
-                                                className="w-full text-sm text-slate-500 dark:text-slate-400 hover:text-pink-600 dark:hover:text-pink-400 transition cursor-pointer py-2 flex items-center justify-center gap-2">
-                                                <i className="fas fa-download"></i> Importar sessão de outro PC
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* IMPORT SESSION */}
-                                {igStep === 'import_session' && (
-                                    <div className="space-y-4">
-                                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl px-4 py-3">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <i className="fas fa-download text-blue-500"></i>
-                                                <span className="text-sm font-bold text-blue-700 dark:text-blue-400">Importar Sessão</span>
-                                            </div>
-                                            <p className="text-xs text-blue-600 dark:text-blue-300">
-                                                Faça login no CRM pelo seu PC de casa, exporte a sessão e cole o token aqui.
-                                                Isso evita o bloqueio de IP do datacenter.
-                                            </p>
-                                        </div>
-                                        {igError && (
-                                            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm rounded-xl px-4 py-3 flex items-center gap-2">
-                                                <i className="fas fa-exclamation-circle"></i>{igError}
-                                            </div>
-                                        )}
-                                        <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Token de Sessão</label>
+                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Page Token (Meta)</label>
                                             <textarea value={igSessionToken} onChange={e => setIgSessionToken(e.target.value)}
-                                                placeholder="Cole o token copiado do outro PC aqui..."
-                                                rows={4}
+                                                placeholder="Cole o Page Token aqui..."
+                                                rows={3}
                                                 className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-white rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition placeholder-slate-400 text-xs font-mono resize-none" />
                                         </div>
-                                        <button onClick={handleIgImportSession}
-                                            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 rounded-xl font-bold hover:opacity-90 transition active:scale-[0.98] cursor-pointer shadow-lg shadow-blue-500/20">
-                                            <i className="fas fa-check-circle mr-2"></i>Importar Sessão
+                                        <button onClick={handleIgConnect}
+                                            className="w-full bg-gradient-to-r from-pink-600 to-orange-500 text-white py-3 rounded-xl font-bold hover:opacity-90 transition active:scale-[0.98] cursor-pointer shadow-lg shadow-pink-500/20">
+                                            <i className="fas fa-link mr-2"></i>Conectar via API Oficial
                                         </button>
-                                        <button onClick={() => { setIgStep('login'); setIgError(''); }}
-                                            className="w-full text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer py-2">
-                                            <i className="fas fa-arrow-left mr-1"></i> Voltar ao login
-                                        </button>
-                                    </div>
-                                )}
-
-                                {/* EXPORT SESSION */}
-                                {igStep === 'export_session' && (
-                                    <div className="space-y-4">
-                                        <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl px-4 py-3">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <i className="fas fa-upload text-emerald-500"></i>
-                                                <span className="text-sm font-bold text-emerald-700 dark:text-emerald-400">Exportar Sessão</span>
-                                            </div>
-                                            <p className="text-xs text-emerald-600 dark:text-emerald-300">
-                                                Copie o token abaixo e cole no CRM da VPS para transferir a sessão.
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Token de Sessão</label>
-                                            <textarea value={igSessionToken} readOnly rows={4}
-                                                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-white rounded-xl outline-none text-xs font-mono resize-none" />
-                                        </div>
-                                        <button onClick={() => { navigator.clipboard.writeText(igSessionToken); }}
-                                            className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white py-3 rounded-xl font-bold hover:opacity-90 transition active:scale-[0.98] cursor-pointer shadow-lg shadow-emerald-500/20">
-                                            <i className="fas fa-copy mr-2"></i>Copiar Token
-                                        </button>
-                                        <button onClick={() => setShowIgModal(false)}
-                                            className="w-full text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer py-2">
-                                            Fechar
-                                        </button>
+                                        <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Usa a API oficial da Meta. Zero risco de bloqueio.</p>
                                     </div>
                                 )}
 
@@ -1668,40 +1551,7 @@ export default function LeadsPage() {
                                     </div>
                                 )}
 
-                                {/* CHALLENGE */}
-                                {igStep === 'challenge' && (
-                                    <div className="space-y-4">
-                                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl px-4 py-3">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <i className="fas fa-shield-alt text-blue-500"></i>
-                                                <span className="text-sm font-bold text-blue-700 dark:text-blue-400">Verificação Necessária</span>
-                                            </div>
-                                            <p className="text-xs text-blue-600 dark:text-blue-300">{igChallengeMsg || 'Insira o código enviado para o seu e-mail.'}</p>
-                                        </div>
-                                        {igError && (
-                                            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm rounded-xl px-4 py-3 flex items-center gap-2">
-                                                <i className="fas fa-exclamation-circle"></i>{igError}
-                                            </div>
-                                        )}
-                                        <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Código de Verificação</label>
-                                            <div className="relative">
-                                                <i className="fas fa-key absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-                                                <input type="text" value={igCode} onChange={e => setIgCode(e.target.value)} placeholder="000000" maxLength={8}
-                                                    className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-white rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition placeholder-slate-400 text-center text-lg tracking-[0.3em] font-mono"
-                                                    onKeyDown={e => e.key === 'Enter' && handleIgVerify()} />
-                                            </div>
-                                        </div>
-                                        <button onClick={handleIgVerify}
-                                            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 rounded-xl font-bold hover:opacity-90 transition active:scale-[0.98] cursor-pointer shadow-lg shadow-blue-500/20">
-                                            <i className="fas fa-check-circle mr-2"></i>Verificar Código
-                                        </button>
-                                        <button onClick={() => { setIgStep('login'); setIgError(''); setIgCode(''); }}
-                                            className="w-full text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer py-2">
-                                            <i className="fas fa-arrow-left mr-1"></i> Voltar ao login
-                                        </button>
-                                    </div>
-                                )}
+                                {/* CHALLENGE - mantido para compatibilidade mas nao usado com Graph API */}
 
                                 {/* SUCCESS — connected, show import button */}
                                 {igStep === 'success' && (

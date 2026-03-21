@@ -2260,7 +2260,12 @@ def instagram_verify():
 @app.route('/api/instagram/status')
 @login_required
 def instagram_status():
-    """Verifica se o usuário já tem uma sessão Instagram ativa."""
+    """Verifica se o usuário tem Instagram conectado (Graph API ou sessão legada)."""
+    # Verificar Graph API (token permanente) primeiro
+    if current_user.meta_token and current_user.ig_page_id:
+        return jsonify({"connected": True, "ig_username": "Instagram Business", "method": "graph_api"})
+
+    # Fallback: verificar sessão Instagrapi legada
     conn = get_db()
     row = conn.execute(
         "SELECT ig_username, connected FROM instagram_sessions WHERE user_id = ?",
@@ -2269,7 +2274,7 @@ def instagram_status():
     conn.close()
 
     if row and row['connected']:
-        return jsonify({"connected": True, "ig_username": row['ig_username']})
+        return jsonify({"connected": True, "ig_username": row['ig_username'], "method": "instagrapi"})
     return jsonify({"connected": False})
 
 
