@@ -427,20 +427,45 @@ export default function LeadsPage() {
         }
     };
 
-    const handleIgConnect = async () => {
-        if (!igSessionToken.trim()) { setIgError('Cole o Page Token da Meta.'); return; }
+    const handleIgOAuth = async () => {
         setIgError('');
         setIgStep('loading');
         try {
-            const res = await fetchApi('/instagram/connect', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: igSessionToken.trim(), page_id: '995827020282407' }),
-            });
-            if (!res.success) { setIgError(res.error || 'Erro ao conectar.'); setIgStep('login'); return; }
-            setIgConnected(true);
-            setIgConnectedUser('Instagram Business');
-            setIgStep('success');
+            const res = await fetchApi('/instagram/oauth/url');
+            if (!res.url) { setIgError('Erro ao gerar URL de autorização.'); setIgStep('login'); return; }
+
+            // Abrir popup de login da Meta
+            const w = 600, h = 700;
+            const left = window.screenX + (window.outerWidth - w) / 2;
+            const top = window.screenY + (window.outerHeight - h) / 2;
+            const popup = window.open(res.url, 'instagram_oauth', `width=${w},height=${h},left=${left},top=${top},scrollbars=yes`);
+
+            // Escutar resultado do popup
+            const handleMessage = (event: MessageEvent) => {
+                if (event.data?.type === 'instagram_oauth') {
+                    window.removeEventListener('message', handleMessage);
+                    if (event.data.status === 'success') {
+                        setIgConnected(true);
+                        setIgConnectedUser(event.data.message || 'Instagram Business');
+                        setIgStep('success');
+                    } else {
+                        setIgError(event.data.message || 'Erro na autorizacao.');
+                        setIgStep('login');
+                    }
+                }
+            };
+            window.addEventListener('message', handleMessage);
+
+            // Verificar se popup foi fechado sem completar
+            const checkClosed = setInterval(() => {
+                if (popup && popup.closed) {
+                    clearInterval(checkClosed);
+                    window.removeEventListener('message', handleMessage);
+                    if (igStep === 'loading') {
+                        setIgStep('login');
+                    }
+                }
+            }, 1000);
         } catch { setIgError('Erro de conexao com o servidor.'); setIgStep('login'); }
     };
 
@@ -1505,21 +1530,16 @@ export default function LeadsPage() {
 
                             {/* Modal Body */}
                             <div className="p-6 overflow-y-auto flex-1">
-                                {/* LOGIN - Meta Graph API */}
+                                {/* LOGIN - OAuth Meta */}
                                 {igStep === 'login' && (
-                                    <div className="space-y-4">
-                                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl px-4 py-3">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <i className="fas fa-shield-alt text-blue-500"></i>
-                                                <span className="text-sm font-bold text-blue-700 dark:text-blue-400">API Oficial da Meta</span>
-                                            </div>
-                                            <p className="text-xs text-blue-600 dark:text-blue-300">
-                                                Conexao segura via Meta Graph API. Sem risco de bloqueio de conta.
-                                                Cole o Page Token gerado no Graph API Explorer.
+                                    <div className="space-y-5">
+                                        <div className="text-center space-y-2">
+                                            <p className="text-sm text-slate-500 dark:text-slate-400">
+                                                Faca login diretamente com sua conta do Instagram.
                                             </p>
                                         </div>
                                         {igError && (
-                                            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 border text-sm rounded-xl px-4 py-3">
+                                            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm rounded-xl px-4 py-3">
                                                 <div className="flex items-center gap-2">
                                                     <i className="fas fa-exclamation-circle"></i>
                                                     <span className="font-semibold">Erro ao conectar</span>
@@ -1527,18 +1547,20 @@ export default function LeadsPage() {
                                                 <p className="mt-1 text-xs opacity-90">{igError}</p>
                                             </div>
                                         )}
-                                        <div>
-                                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Page Token (Meta)</label>
-                                            <textarea value={igSessionToken} onChange={e => setIgSessionToken(e.target.value)}
-                                                placeholder="Cole o Page Token aqui..."
-                                                rows={3}
-                                                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-white rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition placeholder-slate-400 text-xs font-mono resize-none" />
-                                        </div>
-                                        <button onClick={handleIgConnect}
-                                            className="w-full bg-gradient-to-r from-pink-600 to-orange-500 text-white py-3 rounded-xl font-bold hover:opacity-90 transition active:scale-[0.98] cursor-pointer shadow-lg shadow-pink-500/20">
-                                            <i className="fas fa-link mr-2"></i>Conectar via API Oficial
+                                        <button onClick={handleIgOAuth}
+                                            className="w-full bg-[#0095f6] hover:bg-[#1877f2] text-white py-3.5 rounded-xl font-bold transition active:scale-[0.98] cursor-pointer shadow-lg flex items-center justify-center gap-3 text-base">
+                                            <i className="fab fa-instagram text-lg"></i>
+                                            Continuar com Instagram
                                         </button>
-                                        <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Usa a API oficial da Meta. Zero risco de bloqueio.</p>
+                                        <div className="flex items-center gap-3 px-2">
+                                            <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700"></div>
+                                            <span className="text-xs text-slate-400">via Meta Business</span>
+                                            <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700"></div>
+                                        </div>
+                                        <p className="text-xs text-slate-400 dark:text-slate-500 text-center leading-relaxed">
+                                            Voce sera redirecionado para o login oficial da Meta.
+                                            <br />Conexao segura via API oficial. Zero risco de bloqueio.
+                                        </p>
                                     </div>
                                 )}
 

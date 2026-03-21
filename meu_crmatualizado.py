@@ -6,7 +6,7 @@ import os
 import random
 import requests
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, redirect, url_for
+from flask import Flask, request, jsonify, redirect, url_for, make_response
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -78,6 +78,11 @@ limiter = Limiter(
 
 # URL BASE DA API DA META
 GRAPH_URL = "https://graph.facebook.com/v24.0"
+
+# OAuth Meta/Instagram - App credentials
+META_APP_ID = "894347883583271"
+META_APP_SECRET = "896a9c51298703b9c694ebcc42ca86df"
+META_OAUTH_SCOPES = "pages_show_list,instagram_basic,instagram_manage_messages,pages_messaging,pages_read_engagement,pages_manage_metadata,business_management"
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -1085,6 +1090,161 @@ def update_lead_details():
     log_action(current_user.id, f"editou os detalhes de <b>{data['name']}</b>", pid)
     conn.close()
     return jsonify({"success": True})
+
+# ==============================================================================
+# OAUTH INSTAGRAM/META - Login profissional via popup
+# ==============================================================================
+
+@app.route('/api/instagram/oauth/url')
+@login_required
+def instagram_oauth_url():
+    """Retorna a URL de autorização OAuth da Meta para abrir no popup."""
+    # Detectar base URL automaticamente
+    host = request.host_url.rstrip('/')
+    redirect_uri = f"{host}/api/instagram/oauth/callback"
+
+    oauth_url = (
+        f"https://www.facebook.com/v24.0/dialog/oauth"
+        f"?client_id={META_APP_ID}"
+        f"&redirect_uri={redirect_uri}"
+        f"&scope={META_OAUTH_SCOPES}"
+        f"&response_type=code"
+    )
+    return jsonify({"url": oauth_url, "redirect_uri": redirect_uri})
+
+
+@app.route('/api/instagram/oauth/callback')
+def instagram_oauth_callback():
+    """Callback do OAuth da Meta. Troca o code por tokens e fecha o popup."""
+    code = request.args.get('code')
+    error = request.args.get('error')
+
+    if error:
+        error_desc = request.args.get('error_description', 'Autorização negada')
+        return _oauth_result_page(False, error_desc)
+
+    if not code:
+        return _oauth_result_page(False, 'Código de autorização não recebido')
+
+    try:
+        host = request.host_url.rstrip('/')
+        redirect_uri = f"{host}/api/instagram/oauth/callback"
+
+        # 1. Trocar code por short-lived User Token
+        token_resp = requests.get(f"{GRAPH_URL}/oauth/access_token", params={
+            'client_id': META_APP_ID,
+            'client_secret': META_APP_SECRET,
+            'redirect_uri': redirect_uri,
+            'code': code
+        })
+        token_data = token_resp.json()
+
+        if 'error' in token_data:
+            raise Exception(token_data['error'].get('message', 'Erro ao obter token'))
+
+        short_token = token_data['access_token']
+
+        # 2. Trocar por Long-lived User Token (60 dias)
+        ll_resp = requests.get(f"{GRAPH_URL}/oauth/access_token", params={
+            'grant_type': 'fb_exchange_token',
+            'client_id': META_APP_ID,
+            'client_secret': META_APP_SECRET,
+            'fb_exchange_token': short_token
+        })
+        ll_data = ll_resp.json()
+
+        if 'error' in ll_data:
+            raise Exception(ll_data['error'].get('message', 'Erro ao gerar token de longa duração'))
+
+        long_lived_token = ll_data['access_token']
+
+        # 3. Buscar Pages e pegar o Page Token permanente
+        pages_resp = requests.get(f"{GRAPH_URL}/me/accounts", params={
+            'fields': 'id,name,access_token,instagram_business_account',
+            'access_token': long_lived_token
+        })
+        pages_data = pages_resp.json()
+
+        if 'error' in pages_data:
+            raise Exception(pages_data['error'].get('message', 'Erro ao buscar páginas'))
+
+        pages = pages_data.get('data', [])
+        if not pages:
+            return _oauth_result_page(False, 'Nenhuma Página do Facebook encontrada. Vincule uma página ao seu Instagram Business.')
+
+        # Encontrar a página com Instagram Business vinculado
+        page_token = None
+        page_id = None
+        page_name = None
+
+        for page in pages:
+            if 'instagram_business_account' in page:
+                page_token = page['access_token']
+                page_id = page['id']
+                page_name = page.get('name', 'Página')
+                break
+
+        # Se nenhuma tem IG direto, pegar a primeira e verificar
+        if not page_token:
+            for page in pages:
+                pid = page['id']
+                check = requests.get(f"{GRAPH_URL}/{pid}", params={
+                    'fields': 'instagram_business_account',
+                    'access_token': page['access_token']
+                }).json()
+                if 'instagram_business_account' in check:
+                    page_token = page['access_token']
+                    page_id = pid
+                    page_name = page.get('name', 'Página')
+                    break
+
+        if not page_token:
+            return _oauth_result_page(False, 'Nenhuma conta Instagram Business vinculada às suas páginas.')
+
+        # 4. Salvar no banco para TODOS os usuários admin (ou o primeiro)
+        conn = get_db()
+        # Salvar para todos os usuários que existem
+        conn.execute("UPDATE users SET meta_token = ?, ig_page_id = ?", (page_token, page_id))
+        conn.commit()
+        conn.close()
+
+        return _oauth_result_page(True, page_name)
+
+    except Exception as e:
+        return _oauth_result_page(False, str(e))
+
+
+def _oauth_result_page(success, message):
+    """Retorna uma página HTML que envia o resultado pro popup pai e fecha."""
+    status = 'success' if success else 'error'
+    # Escapar aspas na mensagem para evitar XSS
+    safe_message = message.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"').replace('\n', ' ')
+    html = f"""<!DOCTYPE html>
+<html><head><title>Instagram - KeepMedica</title>
+<style>
+    body {{ font-family: -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #0f172a; color: white; }}
+    .card {{ text-align: center; padding: 40px; }}
+    .icon {{ font-size: 48px; margin-bottom: 16px; }}
+    .msg {{ font-size: 14px; color: #94a3b8; margin-top: 8px; }}
+</style></head>
+<body>
+    <div class="card">
+        <div class="icon">{'✅' if success else '❌'}</div>
+        <h2>{'Conectado!' if success else 'Erro'}</h2>
+        <p class="msg">{safe_message}</p>
+        <p class="msg">Fechando...</p>
+    </div>
+    <script>
+        if (window.opener) {{
+            window.opener.postMessage({{ type: 'instagram_oauth', status: '{status}', message: '{safe_message}' }}, '*');
+        }}
+        setTimeout(function() {{ window.close(); }}, 2000);
+    </script>
+</body></html>"""
+    resp = make_response(html)
+    resp.headers['Content-Type'] = 'text/html'
+    return resp
+
 
 @app.route('/api/instagram/connect', methods=['POST'])
 @login_required
