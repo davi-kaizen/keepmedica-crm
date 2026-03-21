@@ -58,14 +58,15 @@ else:
 # Configuração de sessão segura
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
+app.config['SESSION_COOKIE_SECURE'] = os.path.exists('/home/ubuntu')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 
-# CORS — permite requisições do frontend Next.js (local + VPS)
+# CORS — permite requisições do frontend Next.js (local + VPS + domínio)
 CORS(app, resources={r"/api/*": {"origins": [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://136.248.105.0:3000",
+    "https://keepmedica.duckdns.org",
 ]}}, supports_credentials=True)
 
 # Rate Limiter — proteção contra brute force e abuso
