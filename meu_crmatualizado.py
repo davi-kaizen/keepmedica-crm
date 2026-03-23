@@ -1152,19 +1152,13 @@ def instagram_oauth_callback():
             redirect_uri = f"{proto}://{host}/api/instagram/oauth/callback"
 
         # 1. Trocar code por short-lived Instagram Token (via api.instagram.com)
-        post_data = {
+        token_resp = requests.post("https://api.instagram.com/oauth/access_token", data={
             'client_id': IG_APP_ID,
             'client_secret': IG_APP_SECRET,
             'grant_type': 'authorization_code',
             'redirect_uri': redirect_uri,
             'code': code
-        }
-        print(f"[OAUTH DEBUG] redirect_uri={redirect_uri}")
-        print(f"[OAUTH DEBUG] client_id={IG_APP_ID}")
-        print(f"[OAUTH DEBUG] code={code[:20]}...")
-        token_resp = requests.post("https://api.instagram.com/oauth/access_token", data=post_data)
-        print(f"[OAUTH DEBUG] token_resp status={token_resp.status_code}")
-        print(f"[OAUTH DEBUG] token_resp body={token_resp.text[:500]}")
+        })
         token_data = token_resp.json()
 
         if 'error_type' in token_data or 'error_message' in token_data:
@@ -1269,6 +1263,21 @@ def _oauth_result_page(success, message):
 def instagram_oauth_exchange():
     """Endpoint legado - mantido para compatibilidade. Use o fluxo OAuth padrão."""
     return jsonify({"success": False, "error": "Use o fluxo OAuth pelo botão Continuar com Instagram."})
+
+
+@app.route('/api/instagram/deauthorize', methods=['POST'])
+def instagram_deauthorize():
+    """Callback de desautorização - chamado pela Meta quando usuário remove o app."""
+    return jsonify({"url": "https://keepmedica.duckdns.org/privacy", "confirmation_code": "keepmedica_deauth"}), 200
+
+
+@app.route('/api/instagram/data-deletion', methods=['POST'])
+def instagram_data_deletion():
+    """Callback de exclusão de dados - obrigatório pela Meta."""
+    return jsonify({
+        "url": "https://keepmedica.duckdns.org/privacy",
+        "confirmation_code": "keepmedica_deletion_" + str(int(time.time()))
+    }), 200
 
 
 # Webhook verify token (can be any string, we'll use this)
