@@ -1152,13 +1152,19 @@ def instagram_oauth_callback():
             redirect_uri = f"{proto}://{host}/api/instagram/oauth/callback"
 
         # 1. Trocar code por short-lived Instagram Token (via api.instagram.com)
-        token_resp = requests.post("https://api.instagram.com/oauth/access_token", data={
+        post_data = {
             'client_id': IG_APP_ID,
             'client_secret': IG_APP_SECRET,
             'grant_type': 'authorization_code',
             'redirect_uri': redirect_uri,
             'code': code
-        })
+        }
+        print(f"[OAUTH DEBUG] redirect_uri={redirect_uri}")
+        print(f"[OAUTH DEBUG] client_id={IG_APP_ID}")
+        print(f"[OAUTH DEBUG] code={code[:20]}...")
+        token_resp = requests.post("https://api.instagram.com/oauth/access_token", data=post_data)
+        print(f"[OAUTH DEBUG] token_resp status={token_resp.status_code}")
+        print(f"[OAUTH DEBUG] token_resp body={token_resp.text[:500]}")
         token_data = token_resp.json()
 
         if 'error_type' in token_data or 'error_message' in token_data:
