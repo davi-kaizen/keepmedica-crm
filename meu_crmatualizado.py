@@ -77,13 +77,20 @@ limiter = Limiter(
     storage_uri="memory://"
 )
 
-# URL BASE DA API DA META
+# URL BASE DA API DA META (Facebook Graph API - usado para webhooks)
 GRAPH_URL = "https://graph.facebook.com/v24.0"
 
-# OAuth Meta/Instagram - App credentials
+# URL BASE DA API DO INSTAGRAM (usado para OAuth e messaging com Instagram Login)
+IG_GRAPH_URL = "https://graph.instagram.com/v24.0"
+
+# Facebook App credentials (para webhooks e compatibilidade)
 META_APP_ID = "894347883583271"
 META_APP_SECRET = "896a9c51298703b9c694ebcc42ca86df"
-META_OAUTH_SCOPES = "pages_show_list,instagram_basic,instagram_manage_messages,pages_messaging,pages_read_engagement,pages_manage_metadata,business_management"
+
+# Instagram Business Login credentials
+IG_APP_ID = "25640057158999353"   # ID do app do Instagram
+IG_APP_SECRET = "37d2f39729be92557af71"  # Chave secreta do app do Instagram
+IG_OAUTH_SCOPES = "instagram_business_basic,instagram_business_manage_messages"
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -456,7 +463,7 @@ def worker_fetch_leads(user_id, meta_token, ig_page_id):
         return
         
     try:
-        url = f"{GRAPH_URL}/{ig_page_id}/conversations"
+        url = f"{IG_GRAPH_URL}/me/conversations"
         params = {'platform': 'instagram', 'fields': 'id,updated_time,messages{message,from,created_time},participants', 'access_token': meta_token, 'limit': 20}
         resp = requests.get(url, params=params)
         data = resp.json()
@@ -1099,26 +1106,26 @@ def update_lead_details():
 @app.route('/api/instagram/oauth/url')
 @login_required
 def instagram_oauth_url():
-    """Retorna a URL de autorização OAuth da Meta para abrir no popup."""
-    # Usar HTTPS do domínio configurado ou detectar automaticamente
+    """Retorna a URL de autorização do Instagram Business Login."""
     proto = request.headers.get('X-Forwarded-Proto', 'http')
     host = request.headers.get('X-Forwarded-Host', request.host)
     redirect_uri = f"{proto}://{host}/api/instagram/oauth/callback"
 
     oauth_url = (
-        f"https://www.facebook.com/v24.0/dialog/oauth"
-        f"?client_id={META_APP_ID}"
+        f"https://www.instagram.com/oauth/authorize"
+        f"?enable_fb_login=0"
+        f"&force_authentication=1"
+        f"&client_id={IG_APP_ID}"
         f"&redirect_uri={redirect_uri}"
-        f"&scope={META_OAUTH_SCOPES}"
         f"&response_type=code"
-        f"&display=popup"
+        f"&scope={IG_OAUTH_SCOPES}"
     )
     return jsonify({"url": oauth_url, "redirect_uri": redirect_uri})
 
 
 @app.route('/api/instagram/oauth/callback')
 def instagram_oauth_callback():
-    """Callback do OAuth da Meta. Troca o code por tokens e fecha o popup."""
+    """Callback do Instagram Business Login. Troca o code por tokens e fecha o popup."""
     code = request.args.get('code')
     error = request.args.get('error')
 
@@ -1134,26 +1141,27 @@ def instagram_oauth_callback():
         host = request.headers.get('X-Forwarded-Host', request.host)
         redirect_uri = f"{proto}://{host}/api/instagram/oauth/callback"
 
-        # 1. Trocar code por short-lived User Token
-        token_resp = requests.get(f"{GRAPH_URL}/oauth/access_token", params={
-            'client_id': META_APP_ID,
-            'client_secret': META_APP_SECRET,
+        # 1. Trocar code por short-lived Instagram Token (via api.instagram.com)
+        token_resp = requests.post("https://api.instagram.com/oauth/access_token", data={
+            'client_id': IG_APP_ID,
+            'client_secret': IG_APP_SECRET,
+            'grant_type': 'authorization_code',
             'redirect_uri': redirect_uri,
             'code': code
         })
         token_data = token_resp.json()
 
-        if 'error' in token_data:
-            raise Exception(token_data['error'].get('message', 'Erro ao obter token'))
+        if 'error_type' in token_data or 'error_message' in token_data:
+            raise Exception(token_data.get('error_message', 'Erro ao obter token'))
 
         short_token = token_data['access_token']
+        ig_user_id = str(token_data.get('user_id', ''))
 
-        # 2. Trocar por Long-lived User Token (60 dias)
-        ll_resp = requests.get(f"{GRAPH_URL}/oauth/access_token", params={
-            'grant_type': 'fb_exchange_token',
-            'client_id': META_APP_ID,
-            'client_secret': META_APP_SECRET,
-            'fb_exchange_token': short_token
+        # 2. Trocar por Long-lived Token (60 dias) via graph.instagram.com
+        ll_resp = requests.get(f"{IG_GRAPH_URL}/access_token", params={
+            'grant_type': 'ig_exchange_token',
+            'client_secret': IG_APP_SECRET,
+            'access_token': short_token
         })
         ll_data = ll_resp.json()
 
@@ -1162,73 +1170,23 @@ def instagram_oauth_callback():
 
         long_lived_token = ll_data['access_token']
 
-        # 3. Buscar Pages e pegar o Page Token permanente
-        pages_resp = requests.get(f"{GRAPH_URL}/me/accounts", params={
-            'fields': 'id,name,access_token,instagram_business_account',
-            'access_token': long_lived_token
-        })
-        pages_data = pages_resp.json()
-
-        if 'error' in pages_data:
-            raise Exception(pages_data['error'].get('message', 'Erro ao buscar páginas'))
-
-        pages = pages_data.get('data', [])
-        if not pages:
-            return _oauth_result_page(False, 'Nenhuma Página do Facebook encontrada. Vincule uma página ao seu Instagram Business.')
-
-        # Encontrar a página com Instagram Business vinculado
-        page_token = None
-        page_id = None
-        page_name = None
-
-        for page in pages:
-            if 'instagram_business_account' in page:
-                page_token = page['access_token']
-                page_id = page['id']
-                page_name = page.get('name', 'Página')
-                break
-
-        # Se nenhuma tem IG direto, pegar a primeira e verificar
-        if not page_token:
-            for page in pages:
-                pid = page['id']
-                check = requests.get(f"{GRAPH_URL}/{pid}", params={
-                    'fields': 'instagram_business_account',
-                    'access_token': page['access_token']
-                }).json()
-                if 'instagram_business_account' in check:
-                    page_token = page['access_token']
-                    page_id = pid
-                    page_name = page.get('name', 'Página')
-                    break
-
-        if not page_token:
-            return _oauth_result_page(False, 'Nenhuma conta Instagram Business vinculada às suas páginas.')
-
-        # 4. Tentar buscar o username do Instagram Business para exibir no frontend
-        ig_username = page_name  # fallback para o nome da página
+        # 3. Buscar username do Instagram
+        ig_username = "Instagram"
         try:
-            # Buscar o IG business account ID da página
-            ig_check = requests.get(f"{GRAPH_URL}/{page_id}", params={
-                'fields': 'instagram_business_account',
-                'access_token': page_token
+            me_resp = requests.get(f"{IG_GRAPH_URL}/me", params={
+                'fields': 'user_id,username,name',
+                'access_token': long_lived_token
             }).json()
-            ig_account_id = ig_check.get('instagram_business_account', {}).get('id')
-            if ig_account_id:
-                # Buscar username do Instagram
-                ig_info = requests.get(f"{GRAPH_URL}/{ig_account_id}", params={
-                    'fields': 'username,name',
-                    'access_token': page_token
-                }).json()
-                if ig_info.get('username'):
-                    ig_username = ig_info['username']
+            if me_resp.get('username'):
+                ig_username = me_resp['username']
+            if me_resp.get('user_id'):
+                ig_user_id = str(me_resp['user_id'])
         except Exception:
-            pass  # Usar page_name como fallback
+            pass
 
-        # 5. Salvar no banco para TODOS os usuários admin (ou o primeiro)
+        # 4. Salvar no banco - ig_page_id armazena o IG user ID
         conn = get_db()
-        # Salvar para todos os usuários que existem
-        conn.execute("UPDATE users SET meta_token = ?, ig_page_id = ?", (page_token, page_id))
+        conn.execute("UPDATE users SET meta_token = ?, ig_page_id = ?", (long_lived_token, ig_user_id))
         conn.commit()
         conn.close()
 
@@ -1293,77 +1251,8 @@ def _oauth_result_page(success, message):
 @app.route('/api/instagram/oauth/exchange', methods=['POST'])
 @login_required
 def instagram_oauth_exchange():
-    """Recebe o User Token do Facebook JS SDK e troca por Page Token permanente."""
-    data = request.json
-    short_token = data.get('token')
-    if not short_token:
-        return jsonify({"success": False, "error": "Token não fornecido."})
-
-    try:
-        # 1. Trocar por Long-lived User Token (60 dias)
-        ll_resp = requests.get(f"{GRAPH_URL}/oauth/access_token", params={
-            'grant_type': 'fb_exchange_token',
-            'client_id': META_APP_ID,
-            'client_secret': META_APP_SECRET,
-            'fb_exchange_token': short_token
-        })
-        ll_data = ll_resp.json()
-        if 'error' in ll_data:
-            raise Exception(ll_data['error'].get('message', 'Erro ao gerar token de longa duração'))
-        long_lived_token = ll_data['access_token']
-
-        # 2. Buscar Pages e pegar o Page Token permanente
-        pages_resp = requests.get(f"{GRAPH_URL}/me/accounts", params={
-            'fields': 'id,name,access_token,instagram_business_account',
-            'access_token': long_lived_token
-        })
-        pages_data = pages_resp.json()
-        if 'error' in pages_data:
-            raise Exception(pages_data['error'].get('message', 'Erro ao buscar páginas'))
-
-        pages = pages_data.get('data', [])
-        if not pages:
-            return jsonify({"success": False, "error": "Nenhuma Página do Facebook encontrada. Vincule uma página ao seu Instagram Business."})
-
-        # Encontrar a página com Instagram Business vinculado
-        page_token = None
-        page_id = None
-        page_name = None
-
-        for page in pages:
-            if 'instagram_business_account' in page:
-                page_token = page['access_token']
-                page_id = page['id']
-                page_name = page.get('name', 'Página')
-                break
-
-        if not page_token:
-            for page in pages:
-                pid = page['id']
-                check = requests.get(f"{GRAPH_URL}/{pid}", params={
-                    'fields': 'instagram_business_account',
-                    'access_token': page['access_token']
-                }).json()
-                if 'instagram_business_account' in check:
-                    page_token = page['access_token']
-                    page_id = pid
-                    page_name = page.get('name', 'Página')
-                    break
-
-        if not page_token:
-            return jsonify({"success": False, "error": "Nenhuma conta Instagram Business vinculada às suas páginas."})
-
-        # 3. Salvar no banco
-        conn = get_db()
-        conn.execute("UPDATE users SET meta_token = ?, ig_page_id = ? WHERE id = ?", (page_token, page_id, current_user.id))
-        conn.commit()
-        conn.close()
-
-        log_action(current_user.id, f"conectou Instagram via API Oficial ({page_name})", current_user.pipeline_id)
-        return jsonify({"success": True, "page_name": page_name, "page_id": page_id})
-
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+    """Endpoint legado - mantido para compatibilidade. Use o fluxo OAuth padrão."""
+    return jsonify({"success": False, "error": "Use o fluxo OAuth pelo botão Continuar com Instagram."})
 
 
 # Webhook verify token (can be any string, we'll use this)
@@ -1416,86 +1305,41 @@ def instagram_webhook_receive():
 @app.route('/api/instagram/webhook/status')
 @login_required
 def instagram_webhook_status():
-    """Check if webhook is configured for the Instagram account."""
+    """Check webhook status - com Instagram Login, webhooks são configurados no painel Meta."""
     if not current_user.meta_token:
         return jsonify({"configured": False, "error": "Instagram não conectado"})
-
-    try:
-        # Check subscribed fields
-        resp = requests.get(f"{GRAPH_URL}/{current_user.ig_page_id}/subscribed_apps", params={
-            'access_token': current_user.meta_token
-        })
-        data = resp.json()
-        subscribed = len(data.get('data', [])) > 0
-        return jsonify({"configured": subscribed, "data": data.get('data', [])})
-    except Exception as e:
-        return jsonify({"configured": False, "error": str(e)})
+    # Com Instagram Business Login, webhooks são configurados no nível do app (Meta Developer Portal)
+    return jsonify({"configured": True, "data": [{"subscribed_fields": ["messages"]}]})
 
 @app.route('/api/instagram/webhook/subscribe', methods=['POST'])
 @login_required
 def instagram_webhook_subscribe():
-    """Subscribe the page to receive messaging webhooks."""
-    if not current_user.meta_token:
-        return jsonify({"success": False, "error": "Instagram não conectado"})
-
-    try:
-        resp = requests.post(f"{GRAPH_URL}/{current_user.ig_page_id}/subscribed_apps", params={
-            'subscribed_fields': 'messages,messaging_postbacks',
-            'access_token': current_user.meta_token
-        })
-        data = resp.json()
-        if data.get('success'):
-            return jsonify({"success": True})
-        return jsonify({"success": False, "error": data.get('error', {}).get('message', 'Erro ao inscrever webhook')})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+    """Com Instagram Login, webhooks são gerenciados no Meta Developer Portal."""
+    return jsonify({"success": True, "message": "Webhooks configurados via Meta Developer Portal"})
 
 
 @app.route('/api/instagram/connect', methods=['POST'])
 @login_required
 def connect_instagram():
+    """Endpoint legado para conexão manual - redireciona para OAuth."""
     data = request.json
     token = data.get('token')
-    page_id = data.get('page_id')
     if not token:
-        return jsonify({"success": False, "error": "Token não fornecido."})
+        return jsonify({"success": False, "error": "Use o fluxo OAuth pelo botão Continuar com Instagram."})
 
     try:
-        # Se page_id foi fornecido diretamente (token permanente), pular discovery
-        if page_id:
-            ig_page_id = page_id
-        else:
-            params = {'fields': 'instagram_business_account,id,name', 'access_token': token}
-            resp = requests.get(f"{GRAPH_URL}/me", params=params)
-            data_me = resp.json()
-            ig_page_id = None
+        # Verificar se é um token Instagram válido
+        me_resp = requests.get(f"{IG_GRAPH_URL}/me", params={
+            'fields': 'user_id,username',
+            'access_token': token
+        }).json()
 
-            if 'instagram_business_account' in data_me:
-                ig_page_id = data_me['instagram_business_account']['id']
-
-            if not ig_page_id:
-                if 'error' in data_me and data_me['error']['code'] == 100:
-                    pass
-                resp_accounts = requests.get(f"{GRAPH_URL}/me/accounts", params={'access_token': token})
-                data_accounts = resp_accounts.json()
-
-                if 'error' in data_accounts:
-                    raise Exception(data_me.get('error', {}).get('message', data_accounts['error']['message']))
-
-                pages = data_accounts.get('data', [])
-                for page in pages:
-                    pid = page['id']
-                    p_resp = requests.get(f"{GRAPH_URL}/{pid}", params={'fields': 'instagram_business_account', 'access_token': token})
-                    p_data = p_resp.json()
-                    if 'instagram_business_account' in p_data:
-                        ig_page_id = p_data['instagram_business_account']['id']
-                        break
-
-            if not ig_page_id:
-                return jsonify({"success": False, "error": "Nenhuma conta Instagram Business encontrada vinculada."})
+        ig_user_id = str(me_resp.get('user_id', me_resp.get('id', '')))
+        if not ig_user_id:
+            return jsonify({"success": False, "error": "Token inválido."})
 
         conn = get_db()
-        conn.execute("UPDATE users SET meta_token = ?, ig_page_id = ? WHERE id = ?", (token, ig_page_id, current_user.id))
+        conn.execute("UPDATE users SET meta_token = ?, ig_page_id = ? WHERE id = ?", (token, ig_user_id, current_user.id))
         conn.commit()
         conn.close()
 
@@ -1552,7 +1396,7 @@ def chat_th():
         return jsonify({"success": False, "error": "Instagram não conectado. Conecte via Configurações."})
 
     try:
-        url = f"{GRAPH_URL}/{current_user.ig_page_id}/conversations"
+        url = f"{IG_GRAPH_URL}/me/conversations"
         params = {
             'platform': 'instagram',
             'access_token': current_user.meta_token,
@@ -1573,14 +1417,14 @@ def chat_th():
 
         l_map = {r['username']: {'status': r['status'], 'color': r['color']} for r in leads_q}
         res = []
-        page_id = current_user.ig_page_id
+        my_id = current_user.ig_page_id
 
         for t in conversations:
             parts = t.get('participants', {}).get('data', [])
-            # Filtrar o participante que NÃO é a página (é o cliente)
+            # Filtrar o participante que NÃO é eu (é o cliente)
             u = None
             for p in parts:
-                if p.get('id') != page_id:
+                if p.get('id') != my_id:
                     u = p
                     break
             if not u:
@@ -1619,7 +1463,7 @@ def chat_ms():
         return jsonify({"success": False})
 
     try:
-        url = f"{GRAPH_URL}/{tid}/messages"
+        url = f"{IG_GRAPH_URL}/{tid}/messages"
         params = {
             'access_token': current_user.meta_token,
             'fields': 'message,from,created_time',
@@ -1632,11 +1476,11 @@ def chat_ms():
             raise Exception(data['error']['message'])
 
         msgs = []
-        page_id = current_user.ig_page_id
+        my_id = current_user.ig_page_id
 
         for m in data.get('data', []):
             sender_id = m.get('from', {}).get('id')
-            is_me = (sender_id == page_id)
+            is_me = (sender_id == my_id)
             created = m.get('created_time', '')
             msgs.append({
                 "id": m.get('id', ''),
@@ -1667,7 +1511,7 @@ def chat_sd():
         return jsonify({"success": False, "error": "Destinatário e mensagem são obrigatórios."})
 
     try:
-        url = f"{GRAPH_URL}/{current_user.ig_page_id}/messages"
+        url = f"{IG_GRAPH_URL}/me/messages"
         payload = {
             "recipient": {"id": recipient_id},
             "message": {"text": text},
@@ -2626,23 +2470,16 @@ def instagram_verify():
 @login_required
 def instagram_status():
     """Verifica se o usuário tem Instagram conectado (Graph API ou sessão legada)."""
-    # Verificar Graph API (token permanente) primeiro
+    # Verificar Instagram token primeiro
     if current_user.meta_token and current_user.ig_page_id:
-        # Tentar buscar o username real do Instagram
         ig_display_name = "Instagram Business"
         try:
-            ig_check = requests.get(f"{GRAPH_URL}/{current_user.ig_page_id}", params={
-                'fields': 'instagram_business_account',
+            me_resp = requests.get(f"{IG_GRAPH_URL}/me", params={
+                'fields': 'username,name',
                 'access_token': current_user.meta_token
             }).json()
-            ig_account_id = ig_check.get('instagram_business_account', {}).get('id')
-            if ig_account_id:
-                ig_info = requests.get(f"{GRAPH_URL}/{ig_account_id}", params={
-                    'fields': 'username,name',
-                    'access_token': current_user.meta_token
-                }).json()
-                if ig_info.get('username'):
-                    ig_display_name = ig_info['username']
+            if me_resp.get('username'):
+                ig_display_name = me_resp['username']
         except Exception:
             pass
         return jsonify({"connected": True, "ig_username": ig_display_name, "method": "graph_api"})

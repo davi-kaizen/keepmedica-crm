@@ -351,8 +351,8 @@ export default function Header({ onToggleSidebar, navItems, isSidebarOpen, onClo
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                     {activities.length === 0 ? (
                         <p className="text-center text-slate-400 dark:text-slate-500 text-sm py-10">Nenhuma atividade recente.</p>
-                    ) : activities.map((act) => (
-                        <div key={act.id} className="activity-item relative pl-10 pb-4">
+                    ) : activities.map((act, idx) => (
+                        <div key={act.id ?? idx} className="activity-item relative pl-10 pb-4">
                             <div className="absolute left-2 top-1 w-8 h-8 rounded-full bg-brand/20 flex items-center justify-center z-10">
                                 <i className="fas fa-bolt text-brand text-xs"></i>
                             </div>
