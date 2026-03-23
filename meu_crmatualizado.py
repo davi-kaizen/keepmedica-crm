@@ -89,7 +89,7 @@ META_APP_SECRET = "896a9c51298703b9c694ebcc42ca86df"
 
 # Instagram Business Login credentials
 IG_APP_ID = "25640057158999353"   # ID do app do Instagram
-IG_APP_SECRET = "37d2f39729be92557af71"  # Chave secreta do app do Instagram
+IG_APP_SECRET = "37d2f39729be92557af7105f16ffa5af"  # Chave secreta do app do Instagram
 IG_OAUTH_SCOPES = "instagram_business_basic,instagram_business_manage_messages"
 
 # Detectar ambiente: VPS ou local
