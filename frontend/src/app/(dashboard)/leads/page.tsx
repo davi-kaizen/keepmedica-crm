@@ -1726,11 +1726,6 @@ export default function LeadsPage() {
                                                     <i className="fas fa-file-import"></i>
                                                     Confirmar Importação ({igSelectedThreads.size})
                                                 </button>
-                                                <button onClick={handleIgExportSession}
-                                                    className="px-5 bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-600 py-3 rounded-xl font-bold transition cursor-pointer border border-emerald-200 dark:border-emerald-800 flex items-center gap-2"
-                                                    title="Exportar sessão para usar na VPS">
-                                                    <i className="fas fa-upload"></i>
-                                                </button>
                                                 <button onClick={handleIgDisconnect}
                                                     className="px-5 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-500 py-3 rounded-xl font-bold transition cursor-pointer border border-red-200 dark:border-red-800 flex items-center gap-2">
                                                     <i className="fas fa-unlink"></i> Desconectar
