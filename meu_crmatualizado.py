@@ -92,6 +92,10 @@ IG_APP_ID = "25640057158999353"   # ID do app do Instagram
 IG_APP_SECRET = "37d2f39729be92557af71"  # Chave secreta do app do Instagram
 IG_OAUTH_SCOPES = "instagram_business_basic,instagram_business_manage_messages"
 
+# Detectar ambiente: VPS ou local
+_is_production = os.path.exists('/home/ubuntu')
+OAUTH_REDIRECT_URI = "https://keepmedica.duckdns.org/api/instagram/oauth/callback" if _is_production else None
+
 login_manager = LoginManager()
 login_manager.init_app(app)
 
@@ -1107,9 +1111,12 @@ def update_lead_details():
 @login_required
 def instagram_oauth_url():
     """Retorna a URL de autorização do Instagram Business Login."""
-    proto = request.headers.get('X-Forwarded-Proto', 'http')
-    host = request.headers.get('X-Forwarded-Host', request.host)
-    redirect_uri = f"{proto}://{host}/api/instagram/oauth/callback"
+    if OAUTH_REDIRECT_URI:
+        redirect_uri = OAUTH_REDIRECT_URI
+    else:
+        proto = request.headers.get('X-Forwarded-Proto', 'http')
+        host = request.headers.get('X-Forwarded-Host', request.host)
+        redirect_uri = f"{proto}://{host}/api/instagram/oauth/callback"
 
     oauth_url = (
         f"https://www.instagram.com/oauth/authorize"
@@ -1137,9 +1144,12 @@ def instagram_oauth_callback():
         return _oauth_result_page(False, 'Código de autorização não recebido')
 
     try:
-        proto = request.headers.get('X-Forwarded-Proto', 'http')
-        host = request.headers.get('X-Forwarded-Host', request.host)
-        redirect_uri = f"{proto}://{host}/api/instagram/oauth/callback"
+        if OAUTH_REDIRECT_URI:
+            redirect_uri = OAUTH_REDIRECT_URI
+        else:
+            proto = request.headers.get('X-Forwarded-Proto', 'http')
+            host = request.headers.get('X-Forwarded-Host', request.host)
+            redirect_uri = f"{proto}://{host}/api/instagram/oauth/callback"
 
         # 1. Trocar code por short-lived Instagram Token (via api.instagram.com)
         token_resp = requests.post("https://api.instagram.com/oauth/access_token", data={
